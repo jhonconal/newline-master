@@ -1,0 +1,44 @@
+<RCC>
+    <qresource prefix="/">
+        <file>Resource/images/Add space.png</file>
+        <file>Resource/images/Background.png</file>
+        <file>Resource/images/black.css</file>
+        <file>Resource/images/blue.css</file>
+        <file>Resource/images/Cancel.png</file>
+        <file>Resource/images/error.png</file>
+        <file>Resource/images/Font Awesome Cheatsheet.png</file>
+        <file>Resource/images/fontawesome-webfont.ttf</file>
+        <file>Resource/images/horizon.png</file>
+        <file>Resource/images/info.png</file>
+        <file>Resource/images/logo.png</file>
+        <file>Resource/images/navy.css</file>
+        <file>Resource/images/OK.png</file>
+        <file>Resource/images/question.png</file>
+        <file>Resource/icons/trash_close.png</file>
+        <file>Resource/icons/trash_open.png</file>
+        <file>Resource/images/vertical_2.png</file>
+        <file>Resource/images/logo_normal.png</file>
+        <file>Resource/images/logo_active.png</file>
+        <file>Resource/images/alert.png</file>
+        <file>Resource/images/Background_3.png</file>
+        <file>Resource/images/Background_2.png</file>
+        <file>Resource/Helvetica.ttf</file>
+        <file>Resource/images/vertical.png</file>
+        <file>Resource/icons/upload.png</file>
+        <file>Resource/icons/success.png</file>
+        <file>Resource/images/Background_4.png</file>
+        <file>Resource/images/background_5.png</file>
+        <file>Resource/images/warning.png</file>
+        <file>Resource/images/background_6.png</file>
+        <file>Resource/icons/default.png</file>
+        <file>Resource/images/upkoad_btn.png</file>
+        <file>Resource/images/close_bottom.png</file>
+        <file>Resource/icons/close.png</file>
+        <file>Resource/icons/help.png</file>
+        <file>Resource/icons/syncronize.png</file>
+        <file>Resource/icons/Clear_25px.png</file>
+        <file>Resource/icons/Exit_25px.png</file>
+        <file>Resource/icons/Synchronize_25px.png</file>
+        <file>Resource/icons/Synchronize_40px.png</file>
+    </qresource>
+</RCC>

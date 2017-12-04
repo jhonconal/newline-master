@@ -1,0 +1,2 @@
+APP[0]=Foxmail#C:/Foxmail 7.2/Foxmail.exe
+APP[1]=Newline assistant#C:/Program Files (x86)/Newline assistant/Newline assistant.exe

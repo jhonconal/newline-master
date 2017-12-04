@@ -1,0 +1,6 @@
+[2017-07-11 16:18:56 58736824][main()]System font scales ratios (1.000000)
+[2017-07-11 16:18:56 58736895][ReadConfig()]  comNo(1), baudRate(115200)
+[2017-07-11 16:18:56 58736895][main()]   create OpsCom_Thread success
+[2017-07-11 16:18:56 58736895][COMDEV::OpenCom()]create read file (\\.\COM1) OK.
+[2017-07-11 16:18:56 58736895][COMDEV::OpenCom()]create readthread success.
+[2017-07-11 16:18:56 58736895][OpsCom_ThreadFn()]Open com (\\.\COM1) success
