@@ -3,6 +3,8 @@
 
 #include <QDialog>
 #include <QDebug>
+#include <QPoint>
+#include <QMouseEvent>
 namespace Ui {
 class HintDialog;
 }
@@ -31,6 +33,10 @@ public:
 
     void setCancelButtonEnable(bool flag);
 
+protected:
+    void mousePressEvent(QMouseEvent *event);
+    void mouseMoveEvent(QMouseEvent *event);
+
 private slots:
     void on_okButton_clicked();
 
@@ -40,6 +46,9 @@ private slots:
 
 private:
     Ui::HintDialog *ui;
+    QPoint windowPos;
+    QPoint mousePos;
+    QPoint dPos;
 };
 
 #endif // HINTDIALOG_H

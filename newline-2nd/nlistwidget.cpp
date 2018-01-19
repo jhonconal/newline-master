@@ -88,7 +88,7 @@ void NListWidget::itemDoubleClickedSlot(QListWidgetItem *item)
         {
             QStringList section = item->toolTip().split('/');
             QString Name = section.at(section.size()-1);
-            qDebug()<<Name.split('.').at(0)<<"执行成功";
+            qDebug()<<Name.split('.').at(0)<<"====>Execution successed.";
         }
         else
         {

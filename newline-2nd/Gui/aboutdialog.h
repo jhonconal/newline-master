@@ -3,6 +3,8 @@
 
 #include <QDialog>
 #include <QFont>
+#include <QPoint>
+#include <QMouseEvent>
 namespace Ui {
 class AboutDialog;
 }
@@ -21,6 +23,10 @@ public:
     void showParentCenter(QWidget *parentFrm);
 
     void initUiFontSize(double fontSizeRatio);
+protected:
+    void mousePressEvent(QMouseEvent *event);
+    void mouseMoveEvent(QMouseEvent *event);
+
 private slots:
     void on_closeButton_clicked();
 
@@ -28,6 +34,9 @@ private slots:
 
 private:
     Ui::AboutDialog *ui;
+    QPoint windowPos;
+    QPoint mousePos;
+    QPoint dPos;
 };
 
 #endif // ABOUTDIALOG_H

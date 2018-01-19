@@ -15,7 +15,7 @@ AboutDialog::AboutDialog(QWidget *parent) :
     QString Version =hhtHelper::CharToQString(g_Version);
     ui->versionLabel->setText("Newline assistant : Version "+Version.mid(0,Version.size()-2) );
     setWindowFlags(Qt::Tool | Qt::WindowStaysOnTopHint|Qt::FramelessWindowHint);//窗口置顶
-    this->setWindowModality(Qt::ApplicationModal);//阻塞除当前窗体之外的所有的窗体
+    //this->setWindowModality(Qt::ApplicationModal);//阻塞除当前窗体之外的所有的窗体
 }
 
 AboutDialog::~AboutDialog()
@@ -51,4 +51,16 @@ void AboutDialog::on_closeButton_clicked()
 void AboutDialog::on_okButton_clicked()
 {
     this->close();
+}
+
+void AboutDialog::mousePressEvent(QMouseEvent *event)
+{
+    this->windowPos = this->pos();
+    this->mousePos = event->globalPos();
+    this->dPos = mousePos - windowPos;
+}
+
+void AboutDialog::mouseMoveEvent(QMouseEvent *event)
+{
+     this->move(event->globalPos() - this->dPos);
 }

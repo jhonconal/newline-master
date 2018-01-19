@@ -10,7 +10,7 @@ extern QWidget            *g_TrashWidget;
 extern bool          g_SerialStatus;
 extern int            g_nCameraCommandsFlag;//摄像头状态标识
 extern int            g_nDeleteSingleAppFlag;//删除一个APP 发送指令标识
-
+extern  bool         g_nX9FirmwareCheckStatus;//是否是X9固件状态
 TrashWIdget::TrashWIdget(QWidget *parent) : QWidget(parent)
 {
     this->setAttribute(Qt::WA_TranslucentBackground);
@@ -48,7 +48,16 @@ void TrashWIdget::dropEvent(QDropEvent *event)
 
 #ifdef HHT_2ND_PROJECT_SUPPORT
             //Android 返回删除成功标识位
-            emit signal_deleteAppFromVector(g_listWidget->currentItem()->text());
+            if(g_nX9FirmwareCheckStatus)
+            {
+                emit signal_deleteAppFromVector(g_listWidget->currentItem()->text());
+            }
+            else
+            {
+                emit signal_deleteAppFromVector(g_listWidget->currentItem()->text());
+                qDebug()<<g_listWidget->currentItem()->text()<<": [selected to delete success.]";
+                delete g_listWidget->currentItem();
+            }
 #else
             emit signal_deleteAppFromVector(g_listWidget->currentItem()->text());
             qDebug()<<g_listWidget->currentItem()->text()<<": [selected to delete success.]";

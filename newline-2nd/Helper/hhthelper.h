@@ -11,6 +11,9 @@
 #include <QCameraControl>
 #include <QCameraImageCapture>
 #include <QCameraViewfinder>
+#include <QStringList>
+#include <QtSerialPort/QSerialPort>
+#include <QtSerialPort/QSerialPortInfo>
 #include <QDesktopWidget>
 #include "Gui/frmmessagebox.h"
 #include "string.h"
@@ -275,7 +278,43 @@ public:
         }
         return buf;
     }
+    static char *convert_hex_to_str(unsigned char *pBuf, const int nLen,const bool isHex)
+    {
+        static char    acBuf[20000]    = {0,};
+        char             acTmpBuf[10]    = {0,};
+        int                ulIndex         = 0;
+        int                ulBufLen        = 0;
 
+        if ((NULL == pBuf) || (0 >= nLen))
+        {
+            return NULL;
+        }
+
+        ulBufLen = sizeof(acBuf)/sizeof(acTmpBuf);
+        if (ulBufLen >= nLen)
+        {
+            ulBufLen = nLen;
+        }
+
+        memset(acBuf, 0, sizeof(acBuf));
+        memset(acTmpBuf, 0, sizeof(acTmpBuf));
+
+        for(ulIndex=0; ulIndex<ulBufLen; ulIndex++)
+        {
+            if(isHex)
+            {
+                //snprintf(acTmpBuf, sizeof(acTmpBuf), "%04X ", *(pBuf + ulIndex));
+                sprintf_s(acTmpBuf, sizeof(acTmpBuf), "%04X ", *(pBuf + ulIndex));
+            }
+            else
+            {
+                //snprintf(acTmpBuf, sizeof(acTmpBuf), "%02X ", *(pBuf + ulIndex));
+                sprintf_s(acTmpBuf, sizeof(acTmpBuf), "%02X ", *(pBuf + ulIndex));
+            }
+            strcat(acBuf, acTmpBuf);
+        }
+        return acBuf;
+    }
     static QString  QString2HexString(QString str)
     {
         bool ok =true;
@@ -377,6 +416,233 @@ public:
        }
        return WW;
    }
+   static QString toUtf16(const QString &string,bool isShow)
+   {
+       QString source = string;
+       QString target;
+
+       for ( auto c: source )
+       {
+           if ( c.unicode() > 0xff )
+           {
+               if(isShow)
+                   target += "\\u";  //静止开启
+               target += QString::number( c.unicode(), 16 ).rightJustified( 4, '0' );
+           }
+           else
+           {
+               if(isShow)
+                   target +=c;
+               else
+                   target += QString::number( c.unicode(), 16 ).rightJustified( 4, '0' );
+           }
+       }
+       return target;
+   }
+
+  static QString fromUtf16(const QString &string)
+   {
+       QString source = string;
+       QString target;
+
+       while ( !source.isEmpty() )
+       {
+           if ( ( source.size() >= 6 ) && source.startsWith( "\\u" ))
+           {
+               target += QChar( ushort( source.mid( 2, 4 ).toUShort( 0, 16 ) ) );
+               source.remove( 0, 6 );
+           }
+           else
+           {
+               target += source.at( 0 );
+               source.remove( 0, 1 );
+           }
+       }
+       return target;
+   }
+
+   static void data_encrypt(QString data_string,QList<unsigned char> &encrypt_uchar_data_list)
+   {
+            if(data_string.isNull())
+                return;
+            qDebug()<<"===>data_encrypt ["<<data_string<<"]";
+            QByteArray fileNameByteArray = data_string.toLatin1();
+            for(int i=0;i<fileNameByteArray.size();i++)
+            {
+                //qDebug("->0x%x ",fileNameByteArray.at(i));
+                encrypt_uchar_data_list.append(fileNameByteArray.at(i));
+            }
+   }
+   static QString data_decrypt(unsigned char*encrypt_data,int len)
+   {
+       qDebug("Get incoming data(%d):[%s]\n",len,convert_hex_to_str(encrypt_data,len,false));
+       QString decrypt_data;
+       char acBuf[1024]={0,};
+       char acTmpBuf[8] = {0,};
+       if((encrypt_data!=NULL)&&(len>0))
+       {
+           for(int i=0;i<len/4;i<<i++)
+           {
+               unsigned char x0 = decrypt_default(encrypt_data[i*4+0]);
+               unsigned char x1 = decrypt_default(encrypt_data[i*4+1]);
+               unsigned char x2 = decrypt_default(encrypt_data[i*4+2]);
+               unsigned char x3 = decrypt_default(encrypt_data[i*4+3]);
+               unsigned short xBuf = ((((x0<<4)&0xF0) | (x1&0x0F))<<8) | (((x2<<4)&0xF0) | (x3&0x0F));
+               sprintf_s(acTmpBuf, sizeof(acTmpBuf), "\\u%04x",xBuf );
+               strcat(acBuf, acTmpBuf);
+           }
+           decrypt_data = QString(QLatin1String(acBuf));
+       }
+       qDebug()<<"+++++++++"<<decrypt_data;
+       return decrypt_data;
+   }
+   static unsigned char encrypt_default(int a)
+   {
+       if(a>15)
+       {
+           return 0x00;
+       }
+       switch (a)
+       {
+       case 10:
+           return 0x61;
+           break;
+       case 11:
+           return 0x62;
+           break;
+       case 12:
+           return 0x63;
+           break;
+       case 13:
+           return 0x64;
+           break;
+       case 14:
+           return 0x65;
+           break;
+       case 15:
+           return 0x66;
+           break;
+       default:
+           return a;
+           break;
+       }
+       return a;
+   }
+   static void data_encrypt_default(QString data_string,QList<unsigned char> &encrypt_uchar_data_list)
+   {
+       QByteArray data_utf8 = data_string.toUtf8();
+       if(data_utf8.size()>0)
+       {
+           int i=0;
+           for(i;i<data_utf8.length();i++)
+           {
+               unsigned char buf[4];
+               unsigned int a =(unsigned int)(data_utf8.at(i));
+               buf[0]=0x30;
+               encrypt_uchar_data_list.append(buf[0]);
+               //printf("0x%x ",buf[0]);
+
+               buf[1]=0x30;
+               encrypt_uchar_data_list.append(buf[1]);
+               //printf("0x%x ",buf[1]);
+
+               if((int)((a>>4)&0x0F)>int(0x0a))
+               {
+                   buf[2]= encrypt_default(int((a)&0x0F));
+                   encrypt_uchar_data_list.append(buf[2]);
+               }
+               else
+               {
+                   buf[2]=((a>>4)&0x0F)|0x30;
+                   encrypt_uchar_data_list.append(buf[2]);
+               }
+               //printf("0x%x ",buf[2]);
+               if((int)((a)&0x0F)>int(0x0a))
+               {
+                   buf[3]=encrypt_default(int((a)&0x0F));
+                   encrypt_uchar_data_list.append(buf[3]);
+               }
+               else
+               {
+                   buf[3]=((a)&0x0F)|0x30;
+                   encrypt_uchar_data_list.append(buf[3]);
+               }
+               //printf("0x%x ",buf[3]);
+           }
+       }
+   }
+   static unsigned char decrypt_default(unsigned char a)
+   {
+       //0x66 0x65 0x64 0x63 0x62 0x61 -> f e d c b a
+       if((int)a>(int)0x66)
+       {
+           return 0x00;
+       }
+       switch (a)
+       {
+       case 0x61:
+           return 0x0a;
+           break;
+       case 0x62:
+           return 0x0b;
+           break;
+       case 0x63:
+           return 0x0c;
+           break;
+       case 0x64:
+           return 0x0d;
+           break;
+       case 0x65:
+           return 0x0e;
+           break;
+       case 0x66:
+           return 0x0f;
+           break;
+       default:
+           return a;
+           break;
+       }
+       return a;
+   }
+   static unsigned char* data_decrypt_default(unsigned char*encrypt_data,int len)
+   {
+       qDebug("Get incoming data(%d):[%s]\n",len,convert_hex_to_str(encrypt_data,len,false));
+       unsigned char *decrypt_data;
+       int i=0;
+       if((encrypt_data!=NULL)&&(len>0))
+       {
+           decrypt_data  = (unsigned char*)malloc((len/4)*sizeof(unsigned char));
+           memset(decrypt_data,0,len/4);
+           for(i;i<len/4;i<<i++)
+           {
+               unsigned char temp,temp2;
+               if((int)encrypt_data[(i*4)+2]>=(int)0x61)
+               {
+                   temp = decrypt_default(encrypt_data[(i*4)+2]);
+               }
+               else
+               {
+                   temp =((encrypt_data[(i*4)+2]<<4)&0xF0);
+               }
+               //printf("1======>0x%02x\n",temp);
+               if((int)encrypt_data[(i*4)+3]>(int)0x61)
+               {
+                   temp2 = decrypt_default(encrypt_data[(i*4)+3]);
+               }
+               else
+               {
+                   temp2 = encrypt_data[(i*4)+3]&0x0F;
+               }
+               //printf("2======>0x%02x\n",temp2);
+               unsigned char buf =temp|temp2;
+               decrypt_data[i]=buf;
+               //printf("0x%02x\n",decrypt_data[i]);
+           }
+       }
+       //qDebug("Data after decypt:[%s]\n",convert_hex_to_str(decrypt_data,nlen/4,false));
+       return decrypt_data;
+   }
+
 //-----------------------------------------------如下是获取程序版本函数-------------------------------------------------------------------------
    // 将缓冲区中，最前面和最后面的空格和制表符去掉
    static void trim(char *buffer)
@@ -565,6 +831,17 @@ public:
            return false;
        }
        return false;
+   }
+   static QStringList get_local_serial_devices()
+   {
+       QStringList list;
+       list.clear();
+       foreach (const QSerialPortInfo &info, QSerialPortInfo::availablePorts())
+       {
+          list<<info.portName();
+       }
+       qSort(list.begin(),list.end());
+       return list;
    }
 
 };

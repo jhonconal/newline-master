@@ -13,7 +13,7 @@ HintDialog::HintDialog(QWidget *parent) :
     ui->cancelButton->setVisible(false);
     ui->iconLabel->setStyleSheet("border-image: url(:Resource/images/info.png);");
     setWindowFlags(Qt::Tool | Qt::WindowStaysOnTopHint|Qt::FramelessWindowHint);//窗口置顶
-    this->setWindowModality(Qt::ApplicationModal);//阻塞除当前窗体之外的所有的窗体
+    //this->setWindowModality(Qt::ApplicationModal);//阻塞除当前窗体之外的所有的窗体
 }
 
 HintDialog::~HintDialog()
@@ -86,6 +86,18 @@ void HintDialog::setCancelButtonEnable(bool flag)
 {
         ui->cancelButton->setVisible(flag);
         FontScaleRatio::Instance()->setGuiFont("Helvetica",14/g_fontPixelRatio,ui->cancelButton);
+}
+
+void HintDialog::mousePressEvent(QMouseEvent *event)
+{
+    this->windowPos = this->pos();
+    this->mousePos = event->globalPos();
+    this->dPos = mousePos - windowPos;
+}
+
+void HintDialog::mouseMoveEvent(QMouseEvent *event)
+{
+    this->move(event->globalPos() - this->dPos);
 }
 
 void HintDialog::on_okButton_clicked()

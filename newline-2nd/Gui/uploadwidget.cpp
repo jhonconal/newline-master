@@ -118,7 +118,7 @@ void UploadWidget::setValue(int val)
  */
 void UploadWidget::SoltTotalPkgNum(int counts)
 {
-//    HHT_LOG(EN_INFO, "SET UPLOAD RANGE:(%d) ", counts);
+    HHT_LOG(EN_INFO, "SET UPLOAD MAX:(%d) ", counts);
     setRange(0,counts);
     setMaximum(counts);
 }
@@ -128,7 +128,7 @@ void UploadWidget::SoltTotalPkgNum(int counts)
  */
 void UploadWidget::SoltCurrentPkgNum(int currentCounts)
 {
-//    HHT_LOG(EN_INFO, "SET CURRENT UPLOAD: (%d)", currentCounts);
+    HHT_LOG(EN_INFO, "SET UPLOAD CURRENT: (%d)", currentCounts);
     setValue(currentCounts);
 }
 

@@ -23,28 +23,30 @@
 
 NListWidget     *g_listWidget;//全局的ListWidgetextern
 MainDialog      *g_mainDialog;
-QWidget            *g_TrashWidget;
+QWidget           *g_TrashWidget;
 QString               g_tryDeleteAppName;//尝试从列表删除的APP
-char                     g_Version[100];
-bool                      g_SerialStatus;//全局串口状态
-int                        g_PubUsbOpertationStatus=-1 ;//操作状态
+char                    g_Version[100];
+bool                    g_SerialStatus;//全局串口状态
+int                       g_PubUsbOpertationStatus=-1 ;//操作状态
 extern double     g_fontPixelRatio;
 extern int            g_nCameraCommandsFlag;//摄像头状态标识
 extern  int           g_nDeleteSingleAppFlag;//接收已经删除一个APP指令
 extern  int           g_nWriteDeleteSingleAppCommandsFlag;//写请求删除一个APP指令
 extern  int           g_nClearAllAppCommandsFlag;//写请求清除APP列表指令
-extern bool          g_uploadStatus;//上传模块 上传成功标识
+extern  int           g_nJustClearAppInAndroidFlags;//写请求清除Android本地APP
+extern bool         g_uploadStatus;//上传模块 上传成功标识
 extern int            g_nPubUSBCommandsFlag;//切换PubUSB指令标识
-
+extern int            g_nX9FirmwareCheckFlag;//X9固件确认Flags
+bool                    g_nX9FirmwareCheckStatus= false;//是否是X9固件状态
 MainDialog::MainDialog(QWidget *parent) :
     QDialog(parent),
     ui(new Ui::MainDialog)
 {
     HHT_LOG(EN_INFO,"[System font scales ratios (%f)]",g_fontPixelRatio);
     ui->setupUi(this);
-    init();
 
     connect(&PUB_SS,SIGNAL(signal_openProcFromFileName(QString)),this,SLOT(slot_openProcFromFileName(QString)));
+    connect(&PUB_SS,SIGNAL(signal_openProcFromFileNameX5X7(QString)),this,SLOT(slot_openProcFromFileNameX5X7(QString)));
     connect(&PUB_SS,SIGNAL(SignalOpenComFailed()),this,SLOT(slot_RS232isDisabled()));
     connect(&PUB_SS,SIGNAL(SignalOpenComSuccess()),this,SLOT(slot_RS232isAvaliable()));
     //摄像头启用指令信号与槽
@@ -53,6 +55,10 @@ MainDialog::MainDialog(QWidget *parent) :
     connect(&PUB_SS,SIGNAL(SignalPubUsbStatusCheck()),this,SLOT(slot_pubUsbStatusCheck()));
     //清除APP列表
     connect(&PUB_SS,SIGNAL(SignalClearAllApp()),this,SLOT(slot_clearAllApp()));
+
+    connect(&PUB_SS,SIGNAL(SignalFileNameTooLong()),this,SLOT(slot_fileNameTooLong()));
+    //X9固件确认信号与曹
+    connect(&PUB_SS,SIGNAL(SignalX9FirmwareCheck()),this,SLOT(slot_x9FirmwareCheck()));
     //垃圾桶类删除APP信号与槽
     connect(ui->Trash,SIGNAL(signal_deleteAppFromVector(QString)),this,SLOT(slot_deleteAppFromVector(QString)));
     connect(ui->Trash,SIGNAL(signal_deleteAppFromVectorFailed()),this,SLOT(slot_deleteAppFromVectorFailed()));
@@ -61,45 +67,7 @@ MainDialog::MainDialog(QWidget *parent) :
     montageDialog = new MontageDialog();
     connect(montageDialog,SIGNAL(signal_showMainDialog()),this,SLOT(slot_showMainDialog()));
 
-    ReadRecords();
-    //--------------------------------------------------托盘相关--------------------------------------------------
-    QIcon icon = QIcon(":/Resource/images/logo.png");
-    trayIcon = new QSystemTrayIcon(this);
-    trayIcon->setIcon(icon);
-    trayIcon->setToolTip("Newline assistant");
-    trayIcon->show();
-    //添加单/双击鼠标相应
-    connect(trayIcon,SIGNAL(activated(QSystemTrayIcon::ActivationReason)),
-            this,SLOT(trayiconActivated(QSystemTrayIcon::ActivationReason)));
-
-    //创建右键弹出菜单
-    trayIconMenu = new QMenu(this);
-    trayIconMenu->setStyleSheet("QMenu {background-color: white;border: 1px solid white;}"
-                                "QMenu::item {background-color: transparent;padding:12px 56px;"
-                                "margin:0px 4px;border-bottom:1px solid #DBDBDB;}"
-                                "QMenu::item:selected { background-color: #2dabf9;}");
-    FontScaleRatio::Instance()->setGuiFont("Helvetica",12,trayIconMenu);
-    QAction *quitAction = new QAction(tr("Exit"), this);
-    quitAction->setIcon(QIcon(":/Resource/icons/Exit_25px.png"));
-    connect(quitAction, SIGNAL(triggered()), this, SLOT(slot_quitAction()));
-    QAction  *syncAction = new QAction(tr("Manual sync"),this);
-    syncAction->setIcon(QIcon(":/Resource/icons/Synchronize_25px.png"));
-    connect(syncAction, SIGNAL(triggered()), this, SLOT(slot_syncAction()));
-    QAction  *clearAction = new QAction(tr("Manual clear"),this);
-    clearAction->setIcon(QIcon(":/Resource/icons/Clear_25px.png"));
-    connect(clearAction, SIGNAL(triggered()), this, SLOT(slot_clearAction()));
-    //    clearAction->setVisible(false);
-    trayIconMenu->addAction(syncAction);
-    trayIconMenu->addAction(clearAction);
-    trayIconMenu->addAction(quitAction);
-    trayIcon->setContextMenu(trayIconMenu);
-    //--------------------------------------------------------------------------------------------------------------
-    //设置屏蔽罩
-    MaskWidget::Instance()->setMainWidget(this);
-    QStringList dialogNames;
-    dialogNames << "UploadWidget";
-    MaskWidget::Instance()->setDialogNames(dialogNames);
-    //slot_pubUsbStatusCheck();
+    initWind();
 }
 
 MainDialog::~MainDialog()
@@ -182,12 +150,7 @@ void MainDialog::init()
     g_TrashWidget = ui->Trash;
     upload =0;
     ui->BottomWidget->setAttribute(Qt::WA_TranslucentBackground);
-    setWindowFlags(Qt::FramelessWindowHint |Qt::WindowStaysOnTopHint);//窗口无边框，置顶
-#ifdef HHT_2ND_PROJECT_SUPPORT
-    ui->checkButton->setVisible(false);//隐藏取消按钮
-#else
-    ui->closeButton->setVisible(false);
-#endif
+    setWindowFlags(Qt::FramelessWindowHint /*|Qt::WindowStaysOnTopHint*/);//窗口无边框，置顶
     ui->maxButton->setVisible(false);
     ui->minButton->setVisible(false);
     FontScaleRatio::Instance()->setGuiFont("Helvetica",12,ui->label);
@@ -198,7 +161,7 @@ void MainDialog::init()
     QScrollBar *verticalScrollBar=new QScrollBar(this);
     verticalScrollBar->setStyleSheet("QScrollBar:vertical {"
                                      "background-color:transparent; "
-                                     //                                     "border-image: url(:/Resource/images/vertical.png);"
+                                     // "border-image: url(:/Resource/images/vertical.png);"
                                      " width: 15px;"
                                      " margin: 0px 0 0px 0;"
                                      "border-radius: 6px;"
@@ -263,6 +226,63 @@ void MainDialog::init()
                                       );
 #endif
     }
+
+#ifdef HHT_2ND_PROJECT_SUPPORT
+    if(g_nX9FirmwareCheckStatus)//检测到X9固件反馈
+    {
+         ui->checkButton->setVisible(false);//隐藏Check/upload按钮
+         ui->closeButton->setVisible(true);//显示Close按钮
+    }
+    else
+    {
+         ui->closeButton->setVisible(false);//隐藏Close按钮
+         ui->checkButton->setVisible(true);//显示Check/upload按钮
+    }
+#else
+    ui->closeButton->setVisible(false);
+#endif
+
+    //--------------------------------------------------托盘相关--------------------------------------------------
+    QIcon icon = QIcon(":/Resource/images/logo.png");
+    trayIcon = new QSystemTrayIcon(this);
+    trayIcon->setIcon(icon);
+    trayIcon->setToolTip("Newline assistant");
+    trayIcon->show();
+    //添加单/双击鼠标相应
+    connect(trayIcon,SIGNAL(activated(QSystemTrayIcon::ActivationReason)),
+            this,SLOT(trayiconActivated(QSystemTrayIcon::ActivationReason)));
+
+    //创建右键弹出菜单
+    trayIconMenu = new QMenu(this);
+    trayIconMenu->setStyleSheet("QMenu {background-color: white;border: 1px solid white;}"
+                                "QMenu::item {background-color: transparent;padding:12px 56px;"
+                                "margin:0px 4px;border-bottom:1px solid #DBDBDB;}"
+                                "QMenu::item:selected { background-color: #2dabf9;}");
+    FontScaleRatio::Instance()->setGuiFont("Helvetica",12,trayIconMenu);
+    quitAction = new QAction(tr("Exit"), this);
+    //quitAction->setIcon(QIcon(":/Resource/icons/Exit_25px.png"));
+    connect(quitAction, SIGNAL(triggered()), this, SLOT(slot_quitAction()));
+
+    syncAction = new QAction(tr("Manual sync"),this);
+    //syncAction->setIcon(QIcon(":/Resource/icons/Synchronize_25px.png"));
+    connect(syncAction, SIGNAL(triggered()), this, SLOT(slot_syncAction()));
+
+    clearAction = new QAction(tr("Manual clear"),this);
+    //clearAction->setIcon(QIcon(":/Resource/icons/Clear_25px.png"));
+    connect(clearAction, SIGNAL(triggered()), this, SLOT(slot_clearAction()));
+
+    if(g_nX9FirmwareCheckStatus)//
+    {
+        trayIconMenu->addAction(syncAction);
+        //trayIconMenu->addAction(clearAction);
+    }
+    else
+    {
+        trayIconMenu->addAction(quitAction);
+    }
+    trayIcon->setContextMenu(trayIconMenu);
+
+    //--------------------------------------------------------------------------------------------------------------
     this->setWindowTitle(APPLICATION_NAME);//设置程序窗体标题,保障main.cpp中单利运行
     if(g_fontPixelRatio>=3)
     {
@@ -272,6 +292,19 @@ void MainDialog::init()
     {
         this->setFixedSize(QSize(HHT_WIDTH,HHT_HEIGHT));
     }
+
+}
+
+void MainDialog::initWind()
+{
+    init();
+    ReadRecords();
+    //设置屏蔽罩
+    MaskWidget::Instance()->setMainWidget(this);
+    QStringList dialogNames;
+    dialogNames << "UploadWidget";
+    MaskWidget::Instance()->setDialogNames(dialogNames);
+    //slot_pubUsbStatusCheck();
 }
 
 void MainDialog::WriteRecords()
@@ -284,6 +317,7 @@ void MainDialog::WriteRecords()
     {
         file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate);
         file.close();
+        HHT_LOG(EN_INFO,"+++++ \"Record.txt\" not exist.");
     }
     else
     {
@@ -308,6 +342,7 @@ void MainDialog::WriteRecords()
         }
         else
         {
+            HHT_LOG(EN_ERR,"+++++open \"Record.txt\" failed.");
             file.close();
         }
     }
@@ -456,7 +491,10 @@ int MainDialog::sendSingleAppInfoToAndroid(HHTAPPINFO hhtAppInfo)
     if(isFailedOpenCOM)
     {//打开串口失败
         HintDialog *hint = new HintDialog();
-        hint->setMassage(tr("Serial port open failed .  "),-2);
+        if(g_nX9FirmwareCheckStatus)
+            hint->setMassage(tr(" Serial port (com1) open failed . "),-2);
+        else
+             hint->setMassage(tr(" Serial port (com2) open failed . "),-2);
         hint->resize(hint->width()-40,hint->height());
         hint->showParentCenter(this);
         hint->show();
@@ -483,7 +521,13 @@ int MainDialog::sendSingleAppInfoToAndroid(HHTAPPINFO hhtAppInfo)
 
             listFileNameDataUCharList.append(fileNameDataUChar);
             listIconDataUCharList.append(fileIconDataUChar);
-
+            //HHT_LOG(EN_INFO,"FUCK++++++++++++++size[%d]=?=length[%d]++++++++++++++YOU",fileNameDataUChar.size(),fileNameDataUChar.length());
+            if(fileNameDataUChar.size()>COM_VALID_DATA_LEN)
+            {
+                PUB_SS.PostFileNameTooLong();
+                Pub_MSleep(100);
+                return -100;
+            }
             OPS_SendFilesToAndroid(1, listFileNameDataUCharList,listIconDataUCharList);//发送1个APP数据至android
             UploadWidget *Upload= new UploadWidget();
             Upload->showParentCenter(this);
@@ -595,9 +639,12 @@ bool MainDialog::nativeEvent(const QByteArray &eventType, void *message, long *l
     if(pMsg->message==SHOWNORNAL)
     {//自定义Msg
         qDebug()<<"Msg: WM_SHOWNORNAL";
-        //        this->trayiconActivated(QSystemTrayIcon::Trigger);
+#if 1
+        this->trayiconActivated(QSystemTrayIcon::Trigger);
+#else
         this->resize(HHT_WIDTH,HHT_HEIGHT);
         this->showNormal();
+#endif
         return true;
     }
     return false;
@@ -646,7 +693,10 @@ void MainDialog::dropEvent(QDropEvent *event)
 {
     // [[3]]: 当放操作发生后, 取得拖放的数据
     QList<QUrl>urls = event->mimeData()->urls();
-    if (urls.isEmpty()) { return ; }
+    if (urls.isEmpty())
+    {
+        return ;
+    }
     QString path = urls.first().toLocalFile();
     qDebug()<<"[Path]:"<<path;
     if(!path.isEmpty())
@@ -711,17 +761,25 @@ void MainDialog::dropEvent(QDropEvent *event)
                     hhtAppInfo._lnkPath = recodeAbsPath;
                     hhtAppInfo._appIcon = recodeFileIcon;
 #ifdef HHT_2ND_PROJECT_SUPPORT
-                    int result = sendSingleAppInfoToAndroid(hhtAppInfo);
-                    if(result ==0)
+                    if(g_nX9FirmwareCheckStatus)
                     {
-                        if(g_uploadStatus)
+                        int result = sendSingleAppInfoToAndroid(hhtAppInfo);
+                        if(result ==0)
+                        {
+                            if(g_uploadStatus)
+                            {
+                                ui->listWidget->addItem(item);
+                                g_appInfoVector.append(hhtAppInfo);
+                                g_uploadStatus =false;
+                            }
+                        }
+                        else if (result ==1)//newline assistant
                         {
                             ui->listWidget->addItem(item);
                             g_appInfoVector.append(hhtAppInfo);
-                            g_uploadStatus =false;
                         }
                     }
-                    else if (result ==1)//newline assistant
+                    else
                     {
                         ui->listWidget->addItem(item);
                         g_appInfoVector.append(hhtAppInfo);
@@ -746,7 +804,7 @@ void MainDialog::dropEvent(QDropEvent *event)
                     if(isExist)
                     {
                         HintDialog *hint = new HintDialog();
-                        hint->setMassage(tr("The item is already in the list .  "),-1);
+                        hint->setMassage(tr("The item is already in the list ."),-1);
                         hint->showParentCenter(this);
                         hint->show();
                     }
@@ -755,18 +813,26 @@ void MainDialog::dropEvent(QDropEvent *event)
                         hhtAppInfo._fileName = recodeFileName;
                         hhtAppInfo._lnkPath = recodeAbsPath;
                         hhtAppInfo._appIcon = recodeFileIcon;
-#ifdef HHT_2ND_PROJECT_SUPPORT      
-                        int result = sendSingleAppInfoToAndroid(hhtAppInfo);
-                        if(result ==0)
+#ifdef HHT_2ND_PROJECT_SUPPORT
+                        if(g_nX9FirmwareCheckStatus)
                         {
-                            if(g_uploadStatus)
+                            int result = sendSingleAppInfoToAndroid(hhtAppInfo);
+                            if(result ==0)
+                            {
+                                if(g_uploadStatus)
+                                {
+                                    ui->listWidget->addItem(item);
+                                    g_appInfoVector.append(hhtAppInfo);
+                                    g_uploadStatus =false;
+                                }
+                            }
+                            else if (result ==1)//newline assistant
                             {
                                 ui->listWidget->addItem(item);
                                 g_appInfoVector.append(hhtAppInfo);
-                                g_uploadStatus =false;
                             }
                         }
-                        else if (result ==1)//newline assistant
+                        else
                         {
                             ui->listWidget->addItem(item);
                             g_appInfoVector.append(hhtAppInfo);
@@ -781,7 +847,7 @@ void MainDialog::dropEvent(QDropEvent *event)
                 //----------------------------------------------------------------------------------------------------------------------------
 #else
                 HintDialog *hint = new HintDialog();
-                hint->setMassage(tr("Format not supported. You can add .exe and .lnk files only .  ").arg(file_info.fileName()),-2);
+                hint->setMassage(tr("Format not supported. You can add .exe and .lnk files only . ").arg(file_info.fileName()),-2);
                 hint->resize(hint->width()-60,hint->height());
                 hint->showParentCenter(this);
                 hint->show();
@@ -877,17 +943,25 @@ void MainDialog::dropEvent(QDropEvent *event)
                     hhtAppInfo._lnkPath = recodeAbsPath;
                     hhtAppInfo._appIcon = recodeFileIcon;
 #ifdef HHT_2ND_PROJECT_SUPPORT
-                    int result = sendSingleAppInfoToAndroid(hhtAppInfo);
-                    if(result ==0)
+                    if(g_nX9FirmwareCheckStatus)
                     {
-                        if(g_uploadStatus)
+                        int result = sendSingleAppInfoToAndroid(hhtAppInfo);
+                        if(result ==0)
+                        {
+                            if(g_uploadStatus)
+                            {
+                                ui->listWidget->addItem(item);
+                                g_appInfoVector.append(hhtAppInfo);
+                                g_uploadStatus =false;
+                            }
+                        }
+                        else if (result ==1)//newline assistant
                         {
                             ui->listWidget->addItem(item);
                             g_appInfoVector.append(hhtAppInfo);
-                            g_uploadStatus =false;
                         }
                     }
-                    else if (result ==1)//newline assistant
+                    else
                     {
                         ui->listWidget->addItem(item);
                         g_appInfoVector.append(hhtAppInfo);
@@ -912,7 +986,7 @@ void MainDialog::dropEvent(QDropEvent *event)
                     if(isExist)
                     {
                         HintDialog *hint = new HintDialog();
-                        hint->setMassage(tr("The item is already in the list .  "),-1);
+                        hint->setMassage(tr("The item is already in the list ."),-1);
                         hint->showParentCenter(this);
                         hint->show();
                     }
@@ -922,17 +996,25 @@ void MainDialog::dropEvent(QDropEvent *event)
                         hhtAppInfo._lnkPath = recodeAbsPath;
                         hhtAppInfo._appIcon = recodeFileIcon;
 #ifdef HHT_2ND_PROJECT_SUPPORT
-                        int result = sendSingleAppInfoToAndroid(hhtAppInfo);
-                        if(result ==0)
+                        if(g_nX9FirmwareCheckStatus)
                         {
-                            if(g_uploadStatus)
+                            int result = sendSingleAppInfoToAndroid(hhtAppInfo);
+                            if(result ==0)
+                            {
+                                if(g_uploadStatus)
+                                {
+                                    ui->listWidget->addItem(item);
+                                    g_appInfoVector.append(hhtAppInfo);
+                                    g_uploadStatus =false;
+                                }
+                            }
+                            else if (result ==1)//newline assistant
                             {
                                 ui->listWidget->addItem(item);
                                 g_appInfoVector.append(hhtAppInfo);
-                                g_uploadStatus =false;
                             }
                         }
-                        else if (result ==1)//newline assistant
+                        else
                         {
                             ui->listWidget->addItem(item);
                             g_appInfoVector.append(hhtAppInfo);
@@ -950,9 +1032,9 @@ void MainDialog::dropEvent(QDropEvent *event)
             {
                 HintDialog *hint = new HintDialog();
 #ifdef  HHT_SUPPORT_DIR
-                hint->setMassage(tr("Format not supported. You can add .exe and file folder only .  ").arg(file_info.fileName()),-2);
+                hint->setMassage(tr("Format not supported. You can add .exe and file folder only . ").arg(file_info.fileName()),-2);
 #else
-                hint->setMassage(tr("Format not supported. You can add .exe and .lnk files only .  ").arg(file_info.fileName()),-2);
+                hint->setMassage(tr("Format not supported. You can add .exe and .lnk files only . ").arg(file_info.fileName()),-2);
 #endif
                 hint->resize(hint->width()-60,hint->height());
                 hint->showParentCenter(this);
@@ -968,7 +1050,10 @@ void MainDialog::slot_RS232isDisabled()
     if(!this->recvivedFailedOpenCom)
     {//仅仅弹窗一次
         HintDialog *hint = new HintDialog();
-        hint->setMassage(tr(" Serial port open failed .  "),-2);
+        if(g_nX9FirmwareCheckStatus)
+            hint->setMassage(tr(" Serial port (com1) open failed . "),-2);
+        else
+             hint->setMassage(tr(" Serial port (com2) open failed . "),-2);
         hint->showParentCenter(this);
         this->showNormal();
         hint->show();
@@ -981,7 +1066,10 @@ void MainDialog::slot_RS232isDisabled()
 void MainDialog::slot_TrashOpenCOMFailed()
 {
     HintDialog *hint = new HintDialog();
-    hint->setMassage(tr(" Serial port open failed .  "),-2);
+    if(g_nX9FirmwareCheckStatus)
+        hint->setMassage(tr(" Serial port (com1) open failed . "),-2);
+    else
+         hint->setMassage(tr(" Serial port (com2) open failed . "),-2);
     hint->showParentCenter(this);
     hint->show();
 }
@@ -990,6 +1078,8 @@ void MainDialog::slot_RS232isAvaliable()
 {
     this->isFailedOpenCOM = false;
     g_SerialStatus = true;
+    qDebug("==>CONNECTED TO COM DEVICE");
+    HHT_LOG(EN_INFO,"==>CONNECTED TO COM DEVICE");
 }
 
 void MainDialog::slot_openProcFromFileName(QString fileName)
@@ -1129,7 +1219,7 @@ void MainDialog::slot_openProcFromFileName(QString fileName)
                     else
                     {
                         HintDialog *hint = new HintDialog();
-                        hint->setMassage(tr("Excute %1 failed .  ").arg(fileName),-2);
+                        hint->setMassage(tr("Excute %1 failed . ").arg(fileName),-2);
                         hint->showParentCenter(this);
                         this->showNormal();
                         hint->show();
@@ -1141,7 +1231,7 @@ void MainDialog::slot_openProcFromFileName(QString fileName)
     else
     {
         HintDialog *hint = new HintDialog();
-        hint->setMassage(tr("Receive empty commands from smart system .  "),-2);
+        hint->setMassage(tr("Receive empty commands from smart system . "),-2);
         hint->showParentCenter(this);
         this->showNormal();
         hint->show();
@@ -1280,7 +1370,7 @@ void MainDialog::slot_openProcFromFileName(QString fileName)
                 else
                 {
                     HintDialog *hint = new HintDialog();
-                    hint->setMassage(tr("Excute %1 failed .  ").arg(fileName),-2);
+                    hint->setMassage(tr("Excute %1 failed . ").arg(fileName),-2);
                     hint->showParentCenter(this);
                     this->showNormal();
                     hint->show();
@@ -1292,54 +1382,94 @@ void MainDialog::slot_openProcFromFileName(QString fileName)
 else
 {
 HintDialog *hint = new HintDialog();
-hint->setMassage(tr("Receive empty commands from smart system .  "),-2);
+hint->setMassage(tr("Receive empty commands from smart system . "),-2);
 hint->showParentCenter(this);
 this->showNormal();
 hint->show();
 }
 #endif
 }
+//X5/X7 Android打开Windows Apps
+void MainDialog::slot_openProcFromFileNameX5X7(QString fileName)
+{
+        QTextCodec::setCodecForLocale(QTextCodec::codecForName("UTF-8"));//中文乱码
+        HHT_LOG(EN_INFO, "---Android commands to open program: (%s)",fileName.toLocal8Bit().data());
+        if(fileName!=NULL)
+        {
+            for(int i=0;i<g_appInfoVector.count();i++)
+            {
+                if(g_appInfoVector.at(i)._fileName==fileName)
+                {
+                    LPCWSTR program = (LPCWSTR)g_appInfoVector.at(i)._lnkPath.utf16();
+                    HINSTANCE hInstance;
+                    //使用ShellExecute
+                    hInstance = ShellExecute(NULL,NULL,program,NULL,NULL,SW_NORMAL);
+                }
+            }
+        }
+}
 
 void MainDialog::slot_deleteAppFromVector(QString appName)
 {
     //    HHT_LOG(EN_INFO,"[%s] IS GOING TO DELETE",appName.toStdString().c_str());
 #ifdef HHT_2ND_PROJECT_SUPPORT
-    if(g_SerialStatus)//串口存在
+    if(g_nX9FirmwareCheckStatus)//确认是否未X9固件(X5/X7定义不属于该范围)
     {
-        //向Android写删除指令
-        g_tryDeleteAppName = appName;
-        g_nWriteDeleteSingleAppCommandsFlag = 1;// OPS_DeleteSingleAppFromAndroid(appName);
-        hhtHelper::Sleep(500);
+        if(g_SerialStatus)//串口存在
+        {
+            //向Android写删除指令
+            g_tryDeleteAppName = appName;
+            g_nWriteDeleteSingleAppCommandsFlag = 1;// OPS_DeleteSingleAppFromAndroid(appName);
+            hhtHelper::Sleep(500);
+            if(g_appInfoVector.count()>0)
+            {
+                for(int i=0;i<g_appInfoVector.count();i++)
+                {
+                    if(g_appInfoVector.at(i)._fileName==appName)
+                    {
+                        if(g_nDeleteSingleAppFlag==1)//删除标识
+                        {
+                            delete g_listWidget->currentItem();
+                            g_appInfoVector.remove(i);
+                            WriteRecords();
+                            g_nDeleteSingleAppFlag = 0;//删除完复位删除标识
+                        }
+                        else
+                        {
+                            slot_deleteAppFromVectorFailed();
+                            qDebug()<<g_listWidget->currentItem()->text()<<": [selected to delete failed.]";
+                        }
+                    }
+                }
+            }
+        }
+        else
+        {
+            HintDialog *hint = new HintDialog();
+            if(g_nX9FirmwareCheckStatus)
+                hint->setMassage(tr(" Serial port (com1) open failed . "),-2);
+            else
+                 hint->setMassage(tr(" Serial port (com2) open failed . "),-2);
+            hint->resize(hint->width()-40,hint->height());
+            hint->showParentCenter(this);
+            hint->show();
+            qDebug()<<"serial port open failed .";
+        }
+    }
+    else
+    {
+        //    HHT_LOG(EN_INFO,"[%s] IS GOING TO DELETE",appName.toStdString().c_str());
         if(g_appInfoVector.count()>0)
         {
             for(int i=0;i<g_appInfoVector.count();i++)
             {
                 if(g_appInfoVector.at(i)._fileName==appName)
                 {
-                    if(g_nDeleteSingleAppFlag==1)//删除标识
-                    {
-                        delete g_listWidget->currentItem();
-                        g_appInfoVector.remove(i);
-                        WriteRecords();
-                        g_nDeleteSingleAppFlag = 0;//删除完复位删除标识
-                    }
-                    else
-                    {
-                        slot_deleteAppFromVectorFailed();
-                        qDebug()<<g_listWidget->currentItem()->text()<<": [selected to delete failed.]";
-                    }
+                    g_appInfoVector.remove(i);
+                    WriteRecords();
                 }
             }
         }
-    }
-    else
-    {
-        HintDialog *hint = new HintDialog();
-        hint->setMassage(tr("serial port open failed .  "),-2);
-        hint->resize(hint->width()-40,hint->height());
-        hint->showParentCenter(this);
-        hint->show();
-        qDebug()<<"serial port open failed .";
     }
 #else
     //    HHT_LOG(EN_INFO,"[%s] IS GOING TO DELETE",appName.toStdString().c_str());
@@ -1360,7 +1490,16 @@ void MainDialog::slot_deleteAppFromVector(QString appName)
 void MainDialog::slot_deleteAppFromVectorFailed()
 {
     HintDialog *hint = new HintDialog();
-    hint->setMassage(tr("Delete app and sync with smart system failed .  "),-2);
+    hint->setMassage(tr("Delete app and sync with smart system failed . "),-2);
+    hint->resize(hint->width()-40,hint->height());
+    hint->showParentCenter(this);
+    hint->show();
+}
+
+void MainDialog::slot_fileNameTooLong()
+{
+    HintDialog *hint = new HintDialog();
+    hint->setMassage(tr("The file name is too long to drag in ."),-2);
     hint->resize(hint->width()-40,hint->height());
     hint->showParentCenter(this);
     hint->show();
@@ -1376,6 +1515,7 @@ void MainDialog::trayiconActivated(QSystemTrayIcon::ActivationReason reason)
     {
         this->setVisible(true);
         this->resize(HHT_WIDTH,HHT_HEIGHT);
+        this->activateWindow();
         this->showNormal();
     }
         break;
@@ -1388,8 +1528,9 @@ void MainDialog::trayiconActivated(QSystemTrayIcon::ActivationReason reason)
 void MainDialog::slot_syncAction()
 {
     this->showNormal();
-    g_nClearAllAppCommandsFlag=1; //同步APP时先发送清除Android  App指令
-    hhtHelper::Sleep(100);//睡眠100ms
+    g_nJustClearAppInAndroidFlags=1; //同步APP时先发送清除Android  App指令
+    hhtHelper::Sleep(100);//睡眠10ms
+    HHT_LOG(EN_INFO,"======>[X9X8X6]: TRY TO SYNC APPS.\n");
     on_checkButton_clicked();
 }
 
@@ -1410,7 +1551,10 @@ void MainDialog::slot_clearAction()
     else
     {
         HintDialog *hint = new HintDialog();
-        hint->setMassage(tr("serial port open failed .  "),-2);
+        if(g_nX9FirmwareCheckStatus)
+            hint->setMassage(tr(" Serial port (com1) open failed . "),-2);
+        else
+             hint->setMassage(tr(" Serial port (com2) open failed . "),-2);
         hint->resize(hint->width()-40,hint->height());
         hint->showParentCenter(this);
         hint->show();
@@ -1454,23 +1598,30 @@ void MainDialog::slot_cameraStatusCheck()
     else if(result == 0)
     {
         HintDialog *cameraDialog = new HintDialog();
-        cameraDialog->setMassage(tr("UC program is currently running.\n For changing the camera please stop the UC program first .  "),-2);
+        cameraDialog->setMassage(tr("UC program is currently running.\n For changing the camera please stop the UC program first . "),-2);
         cameraDialog->setCancelButtonEnable(false);
         cameraDialog->resize(QSize(215,cameraDialog->height()));
         cameraDialog->setGeometry((this->pos().x()+this->width()/2)- (cameraDialog ->width()/2)-180,
                                   (this->pos().y()+this->height()/2)-(cameraDialog->height()/2),
                                   cameraDialog->width(),cameraDialog->height());
         this->showNormal();
+#if 0
         g_nCameraCommandsFlag = -1;//摄像头被占用
-        cameraDialog->exec();
+        //cameraDialog->exec();
+        cameraDialog->show();
         qDebug()<<"Camera write commands flag: "<<g_nCameraCommandsFlag;
         HHT_LOG(EN_INFO, " --------CAMERA IS OCCUPIED BY OTHER PROGRAM. -------->");
+#else
+        g_nCameraCommandsFlag = 1;//摄像头被占用,强制切换
+        qDebug()<<"Camera write commands flag: "<<g_nCameraCommandsFlag;
+        HHT_LOG(EN_INFO, " --------CAMERA IS OCCUPIED BY OTHER PROGRAM,FORCUS TO SWITCH. -------->");
+#endif
     }
     else if(result==-1)
     {//摄像头不存在 不可用
         /*
         HintDialog *cameraDialog = new HintDialog();
-        cameraDialog->setMassage(tr("Camera is not found.\n For changing the camera please make sure camera is exist first .  "),-2);
+        cameraDialog->setMassage(tr("Camera is not found.\n For changing the camera please make sure camera is exist first . "),-2);
         cameraDialog->setCancelButtonEnable(false);
         cameraDialog->resize(QSize(215,cameraDialog->height()));
         cameraDialog->setGeometry((this->pos().x()+this->width()/2)- (cameraDialog ->width()/2)-210,
@@ -1541,62 +1692,152 @@ void MainDialog::slot_clearAllApp()
     }
 }
 
+void MainDialog::slot_x9FirmwareCheck()
+{
+        g_nX9FirmwareCheckStatus = true;
+        HHT_LOG(EN_INFO,"====>SLOT: Ckeck X9 Firmware Success.");
+        g_nX9FirmwareCheckFlag =-1;
+        //再次初始化界面
+#ifdef HHT_2ND_PROJECT_SUPPORT
+        if(g_nX9FirmwareCheckStatus)//检测到X9固件反馈
+        {
+            ui->checkButton->setVisible(false);//隐藏Check/upload按钮
+            ui->closeButton->setVisible(true);//显示Close按钮
+            trayIconMenu->addAction(syncAction);//显示sync Action
+            //trayIconMenu->addAction(clearAction);//显示clear Action
+            trayIconMenu->removeAction(quitAction);//先删除再显示
+            trayIconMenu->addAction(quitAction);//显示quit Action
+            trayIcon->setContextMenu(trayIconMenu);
+            HHT_LOG(EN_INFO," Reset Main GUI of the Newline Assistant.");
+        }
+        else
+        {
+            ui->closeButton->setVisible(false);//隐藏Close按钮
+            ui->checkButton->setVisible(true);//显示Check/upload按钮
+            qDebug()<<"====>This is fucking X5 X7 Device.\n";
+            HHT_LOG(EN_INFO,"===>This is fucking X5 X7 Device.");
+        }
+#else
+        ui->closeButton->setVisible(false);
+#endif
+}
+
 //全部同步按钮，屏蔽该按钮实现，其他函数可调用该接口实现全部APP上传
 void MainDialog::on_checkButton_clicked()
 {
-    QList<QList<unsigned char>>listAllFilesNameDataUCharList,listAllFilesDataUCharList;
-    //写配置文件
-    WriteRecords();
-    if(isFailedOpenCOM)
-    {//打开串口失败
-        HintDialog *hint = new HintDialog();
-        //         hint->showParentCenter(this);
-        hint->setGeometry((this->pos().x()+this->width()/2)- (hint->width()/3),
-                          (this->pos().y()+this->height()/2)-(hint->height()/2),
-                          hint->width(),hint->height());
-        hint->setMassage(tr("Serial port open failed .  "),-2);
-        hint->show();
-    }
-    else
-    {//打开串口成功
-        int aviliableAppNum=0;//实质发送apps数目
-        if(g_listWidget->count()>0)
-        {
-            for(int i=0;i<g_appInfoVector.count();i++)
+    if(g_nX9FirmwareCheckStatus)
+    {
+        QList<QList<unsigned char>>listAllFilesNameDataUCharList,listAllFilesDataUCharList;
+        //写配置文件
+        WriteRecords();
+        if(isFailedOpenCOM)
+        {//打开串口失败
+            HintDialog *hint = new HintDialog();
+            //         hint->showParentCenter(this);
+            hint->setGeometry((this->pos().x()+this->width()/2)- (hint->width()/3),
+                              (this->pos().y()+this->height()/2)-(hint->height()/2),
+                              hint->width(),hint->height());
+            if(g_nX9FirmwareCheckStatus)
+                hint->setMassage(tr(" Serial port (com1) open failed . "),-2);
+            else
+                hint->setMassage(tr(" Serial port (com2) open failed .  "),-2);
+            hint->show();
+        }
+        else
+        {//打开串口成功
+            HHT_LOG(EN_INFO,"======>[X9X8X6]: SYNC APPS.\n");
+            int aviliableAppNum=0;//实质发送apps数目
+            if(g_listWidget->count()>0)
             {
-                //         MakeByte2UCharList
-                QList<unsigned char> fileNameDataUChar,iconDataUChar;
-                //         QByteArray fileNameByteArray,iconDataByteArray;
-                if(g_appInfoVector.at(i)._fileName==APPLICATION_NAME)
-                {//屏蔽向Android端发送自己信息
-                    qDebug()<<"Prevent send "<<g_appInfoVector.at(i)._fileName<<" to Android";
-                    HHT_LOG(EN_INFO, "Prevent send (%s) to Android", g_appInfoVector.at(i)._fileName.toStdString().c_str());
-                }
-                else
+                for(int i=0;i<g_appInfoVector.count();i++)
                 {
-                    QByteArray fileNameByteArray =g_appInfoVector.at(i)._fileName.toUtf8();//utf8
-                    QByteArray iconDataByteArray = QIcon2QByteArray(g_appInfoVector.at(i)._appIcon);//16进制
-                    //单个APP的数据
-                    MakeByte2UCharList(fileNameByteArray,fileNameDataUChar);
-                    MakeByte2UCharList(iconDataByteArray,iconDataUChar);
-                    //组合所有数据
-                    listAllFilesNameDataUCharList.append(fileNameDataUChar);
-                    listAllFilesDataUCharList.append(iconDataUChar);
-                    qDebug()<<"---->fileName(Asic): "<<fileNameByteArray;
-                    qDebug()<<"---->fileName(Hex): "<<fileNameByteArray.toHex();
-                    HHT_LOG(EN_INFO, "  SEND APP INFO (%s)", fileNameByteArray.data());
-                    aviliableAppNum = listAllFilesNameDataUCharList.count();//获取实质上向android发送的APP数目，除去本身
+                    //         MakeByte2UCharList
+                    QList<unsigned char> fileNameDataUChar,iconDataUChar;
+                    //         QByteArray fileNameByteArray,iconDataByteArray;
+                    if(g_appInfoVector.at(i)._fileName==APPLICATION_NAME)
+                    {//屏蔽向Android端发送自己信息
+                        qDebug()<<"Prevent send "<<g_appInfoVector.at(i)._fileName<<" to Android";
+                        HHT_LOG(EN_INFO, "Prevent send (%s) to Android", g_appInfoVector.at(i)._fileName.toStdString().c_str());
+                    }
+                    else
+                    {
+                        QByteArray fileNameByteArray =g_appInfoVector.at(i)._fileName.toUtf8();//utf8
+                        QByteArray iconDataByteArray = QIcon2QByteArray(g_appInfoVector.at(i)._appIcon);//16进制
+                        //单个APP的数据
+                        MakeByte2UCharList(fileNameByteArray,fileNameDataUChar);
+                        MakeByte2UCharList(iconDataByteArray,iconDataUChar);
+                        //组合所有数据
+                        listAllFilesNameDataUCharList.append(fileNameDataUChar);
+                        listAllFilesDataUCharList.append(iconDataUChar);
+                        qDebug()<<"---->fileName(Asic): "<<fileNameByteArray;
+                        qDebug()<<"---->fileName(Hex): "<<fileNameByteArray.toHex();
+                        HHT_LOG(EN_INFO, "  SEND APP INFO (%s)", fileNameByteArray.data());
+                        aviliableAppNum = listAllFilesNameDataUCharList.count();//获取实质上向android发送的APP数目，除去本身
+                    }
+                }
+                qDebug()<<"[send "<<aviliableAppNum<<"apps to Android]";
+                HHT_LOG(EN_INFO, "  [Send %d apps to Android .]", aviliableAppNum);
+                if(aviliableAppNum!=0)
+                {
+                    OPS_SendFilesToAndroid(aviliableAppNum, listAllFilesNameDataUCharList, listAllFilesDataUCharList);
+                    HHT_LOG(EN_INFO,"======>2[X9X8X6]: SYNC APPS.\n");
+                    qDebug("======>2[X9X8X6]: SYNC APPS.\n");
+//                    UploadWidget *Upload= new UploadWidget();
+                    UploadWidget *Upload= new UploadWidget(this);
+                    Upload->showParentCenter(this);
+                    Upload->show();
                 }
             }
-            qDebug()<<"[send "<<aviliableAppNum<<"apps to Android]";
-            HHT_LOG(EN_INFO, "  [Send %d apps to Android .]", aviliableAppNum);
-            if(aviliableAppNum!=0)
+        }
+    }
+    else
+    {
+         //X5 X7处理TODO
+        qDebug()<<"===>X5 X7 TODO \n";
+        HHT_LOG(EN_INFO,"===>X5 X7 TODO...\n");
+        //写配置文件
+        WriteRecords();
+        if(isFailedOpenCOM)
+        {//打开串口失败
+            HintDialog *hint = new HintDialog();
+            //         hint->showParentCenter(this);
+            hint->setGeometry((this->pos().x()+this->width()/2)- (hint->width()/3),
+                              (this->pos().y()+this->height()/2)-(hint->height()/2),
+                              hint->width(),hint->height());
+            hint->setMassage(tr("Serial port (com2) open failed . "),-2);
+            hint->show();
+        }
+        else
+        {
+            //HHT_LOG(EN_INFO,"1===>X5 X7 SYNC APPS...\n");
+            QList<QList<unsigned char>>listAllFilesNameDataUCharList;
+            int aviliableAppNum=g_listWidget->count();//实质发送apps数目
+            if(aviliableAppNum >0)
             {
-                OPS_SendFilesToAndroid(aviliableAppNum, listAllFilesNameDataUCharList, listAllFilesDataUCharList);
-                UploadWidget *Upload= new UploadWidget();
+                //OPS向Android发送同步APP文件名TODO #appname#appname2#appname3
+                QString clearCmd="#clear";
+                QList<unsigned char> clearCmdDataUChar;
+                hhtHelper::data_encrypt_default( clearCmd,clearCmdDataUChar);//X5X7数据传输加密
+                listAllFilesNameDataUCharList.append(clearCmdDataUChar);
+                for(int i=0;i<g_appInfoVector.count();i++)
+                {
+                    QList<unsigned char> fileNameDataUChar;
+                    QString sndAppName = "#"+g_appInfoVector.at(i)._fileName;//每次同步携带发送清除标志
+                    QString  sndAppNameX5X7 = hhtHelper::toUtf16(sndAppName,false);
+                    qDebug()<<"X5X7 need content: "<<hhtHelper::toUtf16(sndAppName,true);
+                    hhtHelper::data_encrypt(sndAppNameX5X7,fileNameDataUChar);
+                    listAllFilesNameDataUCharList.append(fileNameDataUChar);
+                    HHT_LOG(EN_INFO, "SEND APP INFO[%s]: (%s)", sndAppName.toStdString().c_str(),sndAppNameX5X7.toStdString().c_str());
+                    qDebug("SEND APP INFO[%s]: (%s)", sndAppName.toStdString().c_str(),sndAppNameX5X7.toStdString().c_str());
+                }
+                OPS_SndAppToX5X7(aviliableAppNum+1,listAllFilesNameDataUCharList);
+                //HHT_LOG(EN_INFO,"2===>X5 X7 SYNC APPS...");
+                //qDebug("======>2[X5 X7]: SYNC APPS.");
+                UploadWidget *Upload= new UploadWidget(this);
                 Upload->showParentCenter(this);
                 Upload->show();
             }
+            listAllFilesNameDataUCharList.clear();
         }
     }
 }
@@ -1631,6 +1872,7 @@ void MainDialog::on_minButton_clicked()
 //同步上传，调用on_checkButton_clicked()接口
 void MainDialog::on_syncButton_clicked()
 {
+    g_nJustClearAppInAndroidFlags=1;
     on_checkButton_clicked();//全部上传同步
 }
 

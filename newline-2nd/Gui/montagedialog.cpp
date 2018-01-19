@@ -11,7 +11,7 @@ MontageDialog::MontageDialog(QWidget *parent) :
     FontScaleRatio::Instance()->setGuiFont("Helvetica",12,ui->titleLabel);
     initUiFontSize(g_fontPixelRatio);
     setWindowFlags(Qt::Tool | Qt::WindowStaysOnTopHint|Qt::FramelessWindowHint);//窗口置顶
-    this->setWindowModality(Qt::ApplicationModal);//阻塞除当前窗体之外的所有的窗体
+    //this->setWindowModality(Qt::ApplicationModal);//阻塞除当前窗体之外的所有的窗体
     QScrollBar *verticalScrollBar=new QScrollBar(this);
     verticalScrollBar->setStyleSheet("QScrollBar:vertical { \
                                      max-width: 16px; \
@@ -69,6 +69,18 @@ void MontageDialog::initUiFontSize(double fontSizeRatio)
     FontScaleRatio::Instance()->setGuiFont("Helvetica",13,ui->cancelButton);
     FontScaleRatio::Instance()->setGuiFont("Helvetica",13,ui->activeButton);
     FontScaleRatio::Instance()->setGuiFont("Helvetica",13,ui->installButton);
+}
+
+void MontageDialog::mousePressEvent(QMouseEvent *event)
+{
+    this->windowPos = this->pos();
+    this->mousePos = event->globalPos();
+    this->dPos = mousePos - windowPos;
+}
+
+void MontageDialog::mouseMoveEvent(QMouseEvent *event)
+{
+    this->move(event->globalPos() - this->dPos);
 }
 
 void MontageDialog::on_activeButton_clicked()

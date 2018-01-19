@@ -3,6 +3,8 @@
 
 #include <QDialog>
 #include <QDebug>
+#include <QPoint>
+#include <QMouseEvent>
 #include <QScrollBar>
 #include <QDesktopServices>
 
@@ -27,7 +29,10 @@ public:
     void initUiFontSize(double fontSizeRatio);
 
     const  int get_operation_status();
-signals:
+
+protected:
+    void mousePressEvent(QMouseEvent *event);
+    void mouseMoveEvent(QMouseEvent *event);
 
 private slots:
     void on_SwitchButton_clicked();
@@ -39,6 +44,9 @@ private slots:
 private:
     Ui::PubUSBDialog *ui;
     int  m_operation_status;
+    QPoint windowPos;
+    QPoint mousePos;
+    QPoint dPos;
 };
 
 #endif // PUBUSBDIALOG_H

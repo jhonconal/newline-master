@@ -43,7 +43,7 @@ INT32 COMDEV::OpenCom(char *pcPortName,INT32 nBaudRate)
                                 NULL);
     if ((INVALID_HANDLE_VALUE == m_hHandle) || (NULL == m_hHandle))
     {
-        HHT_LOG(EN_ERR, "create read file (%s) failed.", strCom.toStdString().c_str());
+        //HHT_LOG(EN_ERR, "create read file (%s) failed.", strCom.toStdString().c_str());
         CloseHandle(m_hHandle);
         return -9;
     }
@@ -279,7 +279,7 @@ INT32 COMDEV::ReadComByHeader(UINT8 * pcBuf, const INT32 nLen)
                 nReadLen = m_nRealBufLen;
             }
 
-
+            //7F YY 99 A2 B3 C4 02 FF 70 A1 ZZ CHK CF
             /* 开始读取数据 */
             if (m_nStartPos < m_nEndPos)    //buffer正常顺序
             {
@@ -350,6 +350,127 @@ INT32 COMDEV::ReadComByHeader(UINT8 * pcBuf, const INT32 nLen)
     }
 
     return -1;
+}
+
+INT32 COMDEV::ReadX5X7ComByHeader(UINT8 *pcBuf, const INT32 nLen)
+{
+    INT32 nReadLen = 0;
+    INT32 nDataLen = 0;
+    INT32 nEndPos = 0;
+    UINT8 acCmdSnderOps[3] = {0x02, 0x00, 0x03};            //发送者标识 发送给Android
+    UINT8 acCmdSnderAndroid[3] = {0x01, 0x00, 0x03};     //发送者标识 发送给OPS
+    INT64 nPreTime = 0;
+
+    if ((NULL == pcBuf) || (0 >= nLen))
+    {
+        return -1;
+    }
+
+    if ((INVALID_HANDLE_VALUE == m_hHandle) || (NULL == m_hHandle))
+    {
+        HHT_LOG(EN_ERR, "read handle[%d] is invalid", m_hHandle);
+        return -2;
+    }
+
+//    HHT_LOG(EN_DEBUG, "\n startpos [%d]0x%02x 0x%02x, endpos[%d] 0x%02x 0x%02x , num[%d]",
+//            m_nStartPos,  m_acComBuf[m_nStartPos],m_acComBuf[m_nStartPos+1],
+//            m_nEndPos,m_acComBuf[m_nEndPos], m_acComBuf[m_nEndPos-1],
+//            m_nRealBufLen);
+
+    nPreTime = Pub_GetCurrentTimeClick();
+    while (50 > (Pub_GetCurrentTimeClick() - nPreTime))//50ms超时
+    {
+        if ((0 >= m_nRealBufLen) || (12 > m_nRealBufLen)) //没有有效数据
+        {
+            Pub_MSleep(1);         //防止死循环CPU过高
+            continue;
+        }
+        nReadLen = nLen;
+        if (NULL != m_acComBuf)
+        {
+            /* 数据头正确但整条数据可能未读完 */
+            if (nReadLen > m_nRealBufLen)
+            {
+                HHT_LOG(EN_DEBUG, "nReadLen[%d],reallen[%d]", nReadLen, m_nRealBufLen);
+                //continue;
+                nReadLen = m_nRealBufLen;
+            }
+
+            //aa 55 (1a 00)长度  4a/序列号 (10 00 03)/发送方标识  [30 30 36 38  30 30 36 35 30 30 36 31  30 30 37 32  30 30 37 34]/数据  (6b 04)校验和 55 aa
+            //7F YY 99 A2 B3 C4 02 FF 70 A1 ZZ CHK CF
+            /* 开始读取数据 */
+            if (m_nStartPos < m_nEndPos)    //buffer正常顺序
+            {
+                /*先找到正确的包头位置*/  //header 0xaa 0x55  ender 0x55 0xaa
+                while (m_nStartPos < m_nEndPos)
+                {
+                    if ( (COM_X5X7_HEADER == m_acComBuf[m_nStartPos])&&
+                         (COM_X5X7_HEADER2 == m_acComBuf[m_nStartPos+1]))
+                    {
+                        break;
+                    }
+                    m_nStartPos++;
+                    m_nRealBufLen--;
+                }
+                if (m_nEndPos == m_nStartPos)   //缓冲区数据为空,没有找到合法的数据包
+                {
+                    return -3;
+                }
+                nDataLen =(int)(m_acComBuf[m_nStartPos+2]|((m_acComBuf[m_nStartPos+3]<<8)&0xFFFF));//0x1a 0x00->0x001a 计算长度
+                nEndPos = 5+m_nStartPos+nDataLen;   //包尾位置
+                HHT_LOG(EN_INFO, "X5.X7===>, datalen:%d, EndPos:%d, startPos:%d  header:[0x%02x 0x%02x] ender:[0x%02x 0x%02x]",
+                nDataLen, m_nEndPos, m_nStartPos,m_acComBuf[m_nStartPos],m_acComBuf[m_nStartPos+1],m_acComBuf[nEndPos-1],m_acComBuf[nEndPos]);
+                if ((nDataLen+5) > (m_nEndPos-m_nStartPos))
+                {
+                    return -4;
+                }
+                if (nEndPos < COM_BUF_LEN)
+                {
+                    nReadLen = nDataLen+6;
+                    HHT_LOG(EN_INFO, "X5.X7===>[nEndPos-1]:0x%02x [nEndPos]0x%02x",m_acComBuf[nEndPos-1],m_acComBuf[nEndPos]);
+                    if ((COM_X5X7_ENDER == m_acComBuf[nEndPos-1])&&
+                        (COM_X5X7_ENDER2 == m_acComBuf[nEndPos]))
+                    {
+                        memcpy(pcBuf, (m_acComBuf + m_nStartPos), nReadLen);
+                        m_nStartPos += nReadLen;
+                        m_nRealBufLen -= nReadLen;
+                        return nReadLen;
+                    }
+                    else
+                    {
+                        m_nStartPos += nReadLen;
+                        m_nRealBufLen -= nReadLen;
+                        return -5;
+                    }
+                }
+                else
+                {
+                    return -6;
+                }
+            }
+            else                           //buffer头大于尾
+            {
+                if ((m_nStartPos + nReadLen) < COM_BUF_LEN)//尾部可供读取数据
+                {
+                    memcpy(pcBuf, (m_acComBuf + m_nStartPos), nReadLen);
+                    m_nStartPos += nReadLen;
+                    m_nRealBufLen -= nReadLen;
+                    return nReadLen;
+                }
+                else//尾部不够读取,需要移位到头部
+                {
+                    int nTmpLen = m_nStartPos + nReadLen - COM_BUF_LEN;
+                    memcpy(pcBuf, (m_acComBuf + m_nStartPos), (nReadLen - nTmpLen));
+                    m_nStartPos = 0;
+                    memcpy(&pcBuf[nReadLen-nTmpLen], (m_acComBuf + m_nStartPos), nTmpLen);
+                    m_nStartPos = nTmpLen;
+                    m_nRealBufLen -= nReadLen;
+                    return nReadLen;
+                }
+            }
+        }
+    }
+    return -100;
 }
 
 

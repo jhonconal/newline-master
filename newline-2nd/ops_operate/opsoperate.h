@@ -14,13 +14,25 @@
 #define COM_VALID_DATA_LEN (50) //每包有效数据长度
 //#define MAX_FILE_NUM (100)  //最大传输文件数定义为100
 
+#define CMD_HEADER				0x55aa
+#define CMD_ENDER                  0xaa55
+#define COM_X5X7_HEADER (0xAA)
+#define COM_X5X7_HEADER2 (0x55)
+#define COM_X5X7_ENDER    (0x55)
+#define COM_X5X7_ENDER2    (0xAA)
+//判断设备类型
+int*  get_handshake_status();
+THREADRETURN distinguish_device(void*pParam);
 THREADRETURN OpsCom_ThreadFn(void *pParam);
+THREADRETURN X5X7OpsCom_ThreadFn(void *pParam);
+void  OPS_SendFilesToAndroid(int nFileNum, QList<QList<unsigned char>>listAllFilesName, QList<QList<unsigned char>> listAllFilesData);
+void  OPS_SndAppToX5X7(int nFileNum,QList<QList<unsigned char>>listAllFilesName);
+int     OPS_DeleteSingleAppFromAndroid(QString appName);
+void  ReadConfig();
+void  OPS_QuitThread();
+int    Ops_WriteFiles(COMDEV *pstComDev);
+int    Ops_WriteX5X7Files(COMDEV *pstComDev);
+int    Ops_WriteStatus();
 
-void OPS_SendFilesToAndroid(int nFileNum, QList<QList<unsigned char>>listAllFilesName, QList<QList<unsigned char>> listAllFilesData);
-int OPS_DeleteSingleAppFromAndroid(QString appName);
-void ReadConfig();
-void OPS_QuitThread();
-int   Ops_WriteFiles(COMDEV *pstComDev);
-int   Ops_WriteStatus();
 #endif // OPSOPERATE_H
 

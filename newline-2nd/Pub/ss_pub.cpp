@@ -62,6 +62,11 @@ void PUBComClass::PostOpenApp(QString strAppName)
     emit signal_openProcFromFileName(strAppName);
 }
 
+void PUBComClass::PostOpenAppX5X7(QString strAppName)
+{
+    emit signal_openProcFromFileNameX5X7(strAppName);
+}
+
 void PUBComClass::PostOpenComFailed()
 {
     emit SignalOpenComFailed();
@@ -100,4 +105,14 @@ void PUBComClass::PostPubUsbStatusCheck()
 void PUBComClass::PostClearAllApp()
 {
     emit SignalClearAllApp();
+}
+
+void PUBComClass::PostX9FirmwareCheck()
+{
+    emit SignalX9FirmwareCheck();
+}
+
+void PUBComClass::PostFileNameTooLong()
+{
+    emit SignalFileNameTooLong();
 }

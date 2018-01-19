@@ -3,6 +3,8 @@
 
 #include <QDialog>
 #include <QDebug>
+#include <QPoint>
+#include <QMouseEvent>
 #include <QScrollBar>
 #include <QDesktopServices>
 namespace Ui {
@@ -23,6 +25,11 @@ public:
      */
     void showParentCenter(QWidget *parentFrm);
     void initUiFontSize(double fontSizeRatio);
+
+protected:
+    void mousePressEvent(QMouseEvent *event);
+    void mouseMoveEvent(QMouseEvent *event);
+
 private slots:
     void on_activeButton_clicked();
 
@@ -35,6 +42,9 @@ signals:
     void signal_showMainDialog();
 private:
     Ui::MontageDialog *ui;
+    QPoint windowPos;
+    QPoint mousePos;
+    QPoint dPos;
 };
 
 #endif // MONTAGEDIALOG_H

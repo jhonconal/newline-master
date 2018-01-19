@@ -13,7 +13,7 @@ PubUSBDialog::PubUSBDialog(QDialog *parent) :
     FontScaleRatio::Instance()->setGuiFont("Helvetica",12,ui->TitleLabel);
     initUiFontSize(g_fontPixelRatio);
     setWindowFlags(Qt::Tool | Qt::WindowStaysOnTopHint|Qt::FramelessWindowHint);//窗口置顶
-    this->setWindowModality(Qt::ApplicationModal);//阻塞除当前窗体之外的所有的窗体
+    //this->setWindowModality(Qt::ApplicationModal);//阻塞除当前窗体之外的所有的窗体
     QScrollBar *verticalScrollBar=new QScrollBar(this);
     verticalScrollBar->setStyleSheet("QScrollBar:vertical { \
                                      max-width: 16px; \
@@ -76,7 +76,19 @@ void PubUSBDialog::initUiFontSize(double fontSizeRatio)
 
 const int PubUSBDialog::get_operation_status()
 {
-      return m_operation_status;
+    return m_operation_status;
+}
+
+void PubUSBDialog::mousePressEvent(QMouseEvent *event)
+{
+    this->windowPos = this->pos();
+    this->mousePos = event->globalPos();
+    this->dPos = mousePos - windowPos;
+}
+
+void PubUSBDialog::mouseMoveEvent(QMouseEvent *event)
+{
+    this->move(event->globalPos() - this->dPos);
 }
 
 void PubUSBDialog::on_SwitchButton_clicked()

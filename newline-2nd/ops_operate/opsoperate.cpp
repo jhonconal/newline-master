@@ -1,14 +1,21 @@
 #include "opsoperate.h"
 #include "comOperate.h"
 #include "ss_pub.h"
+#include <QMutex>
+#define  SUPORT_X5X7_DEVICE  1  //支持 X5/X7
 
 int g_nWriteStatus = -1;
 int g_nWriteFileFlag = 0;
+int g_nWriteX5X7FileFlag = 0;
 int g_nDeleteSingleAppFlag=0;//接收已经删除一个APP指令
 int g_nWriteDeleteSingleAppCommandsFlag=0;//写请求删除一个APP指令
 int g_nClearAllAppCommandsFlag=0;//写请求清除APP列表指令
+int g_nJustClearAppInAndroidFlags =0;//写请求清除Android本地APP
 int g_nCameraCommandsFlag=0;//切换摄像头指令标识
 int g_nPubUSBCommandsFlag=-1;//切换PubUSB指令标识
+int g_nX9FirmwareCheckFlag=1;//X9固件确认Flags
+int g_nX5X7HandShakeFlag =1;//X5 X7 通讯握手
+extern bool   g_nX9FirmwareCheckStatus;//是否是X9固件状态
 int g_nFileNum = 0;
 int g_nTotalPkgNum = 0;
 int g_nCurrentPkgNum = 0;
@@ -63,6 +70,7 @@ THREADRETURN OpsCom_ThreadFn(void *pParam)
     UINT8 acSndBuf[COM_DATA_PKG_LEN] = {0,};
     Q_UNUSED(pParam);
 
+#if     !SUPORT_X5X7_DEVICE
     memset(acDevName, 0, sizeof(acDevName));
     nRet = COM_GetComPortNameFromIndex(g_stComportInfo.nComNo, acDevName);
     if (RET_SUCCESS != nRet)
@@ -98,7 +106,7 @@ THREADRETURN OpsCom_ThreadFn(void *pParam)
         }
     }
     HHT_LOG(EN_ERR, "Open com (%s) success", acDevName);
-
+#endif
 //    PUB_SS.PostCameraStatusCheck();//测试摄像头弹窗
 
     for (;;)
@@ -108,8 +116,36 @@ THREADRETURN OpsCom_ThreadFn(void *pParam)
             HHT_LOG(EN_INFO, "  Exit Ops com Thread");
             break;
         }
+#if     !SUPORT_X5X7_DEVICE
+        //X9 firmware check commands
+        if(g_nX9FirmwareCheckFlag ==1)
+        {
+            UINT8 mSndBuf[13]= {0x7F,0x09,0x99,0xA2,0xB3,0xC4,0x02,0xFF,0x93,0xA0,0xEF,0xCF};
+            while((10>nRetrytimes)&&(g_nX9FirmwareCheckFlag==1))
+            {
+                int Ret= g_stComDev.WriteCom(mSndBuf,13);
+                if(Ret ==0)
+                {
+                    nRetrytimes++;
+                    Pub_MSleep(100);
+                    HHT_LOG(EN_INFO, "Write request check x9 firmware status commands failed.");
+                }
+                else
+                {
+                    HHT_LOG(EN_INFO, "Write request check x9 firmware status commands success.");
+                    nRetrytimes ++;
+                    Pub_MSleep(100);
+                }
+                if(nRetrytimes>=10||g_nX9FirmwareCheckFlag!=1)
+                {
+                    nRetrytimes=0;
+                    break;
+                }
+            }
+        }
+#endif
          //清除APP列表
-         //7F YY 99 A2 B3 C4 02 FF 90 A0 CHK CF   7F YY 99 A2 B3 C4 02 FF 90 A1 ZZ CHK CF 清除列表
+         //7F YY 99 A2 B3 C4 02 FF 90 A0 CHK CF / 7F YY 99 A2 B3 C4 02 FF 90 A1 ZZ CHK CF 清除列表
         if(g_nClearAllAppCommandsFlag == 1)
         {
             qDebug()<<Q_FUNC_INFO<<"Write clear app list commands .";
@@ -133,6 +169,29 @@ THREADRETURN OpsCom_ThreadFn(void *pParam)
              }
              g_nClearAllAppCommandsFlag =0;//复位写请求删除标识
         }
+        if(g_nJustClearAppInAndroidFlags==1)
+        {
+            qDebug()<<Q_FUNC_INFO<<"Just clear app list in Android commands .";
+            HHT_LOG(EN_INFO, "Just clear app list in Android commands .");
+             UINT8 mSndBuf[13]= {0x7F,0x09,0x99,0xA2,0xB3,0xC4,0x02,0xFF,0x94,0xA0,0xF0,0xCF};
+             while (3 > nRetrytimes)
+             {
+                 nRet = g_stComDev.WriteCom(mSndBuf,13);
+                 if (0 == nRet)
+                 {
+                     nRetrytimes++;
+                     Pub_MSleep(100);
+                     HHT_LOG(EN_ERR, "Write Just clear app list in Android commands  to Com failed (%d)", nRetrytimes);
+                     continue;
+                 }
+                 else
+                 {
+                     HHT_LOG(EN_ERR, "Write Just clear app list in Android commands  Com success .");
+                     break;
+                 }
+             }
+            g_nJustClearAppInAndroidFlags =0;
+        }
         //-------------------------------------------------------------------------------------------------------
         //7F YY 99 A2 B3 C4 02 FF 91 A0  WW WW XX XX XX ……CHK CF   7F YY 99 A2 B3 C4 02 FF 91 A1 ZZ   WW WW XX XX XX ……CHK CF 删除一个APP
         if(g_nWriteDeleteSingleAppCommandsFlag ==1)
@@ -153,7 +212,6 @@ THREADRETURN OpsCom_ThreadFn(void *pParam)
             g_tryDeleteAppName ="";
         }
         //-------------------------------------------------------------------------------------------------------
-
         //7F YY 99 A2 B3 C4 02 FF 92 A0 CHK CF   7F YY 99 A2 B3 C4 02 FF 92 A1  ZZ CHK CF //PubUSB接收
         //切换PubUSB请求
         if(g_nPubUSBCommandsFlag ==1)
@@ -281,11 +339,27 @@ THREADRETURN OpsCom_ThreadFn(void *pParam)
             }
             else
             {
-                HHT_LOG(EN_INFO, "Ops write files to Android success");
+                HHT_LOG(EN_INFO, "[X9 X8 X6]: Ops write files to Android success");
             }
             g_nWriteFileFlag = 0;
         }
-
+#if     !SUPORT_X5X7_DEVICE
+        if(1==g_nWriteX5X7FileFlag)
+        {
+            //X5 X7 Frimware status
+            nRet = Ops_WriteX5X7Files(&g_stComDev);
+            if(RET_SUCCESS!=nRet)
+            {
+                HHT_LOG(EN_ERR, "[X5X7]: Ops write files to Android failed");
+                PUB_SS.PostSendFileToAndroidFailed();//
+            }
+            else
+            {
+                HHT_LOG(EN_INFO, "[X5X7]: Ops write files to Android success");
+            }
+            g_nWriteX5X7FileFlag==0;
+        }
+#endif
         memset(acRcvBuf, 0, sizeof(acRcvBuf));
         nRet = g_stComDev.ReadComByHeader(acRcvBuf,COM_DATA_PKG_LEN);//read commands
         if (0 >= nRet)
@@ -356,7 +430,16 @@ THREADRETURN OpsCom_ThreadFn(void *pParam)
                 }
             }
         }
-
+#if     !SUPORT_X5X7_DEVICE
+        //接受来自Android的X9 firmware响应
+        if((COM_HEADER ==acRcvBuf[0])&&(0 == memcmp(&acRcvBuf[2], acCmdSign, 6))
+            &&(0x93 == acRcvBuf[8]) && (0xA1 == acRcvBuf[9])&&(0x00 == acRcvBuf[10]))
+        {
+                HHT_LOG(EN_INFO, "Received X9 Firmware check echo from Android.");
+                PUB_SS.PostX9FirmwareCheck();//发送X9固件确认信号
+                g_nX9FirmwareCheckFlag =-1;
+        }
+#endif
         //----------------------------------------------------------------------------------------------------------
         // 添加读取底层调用摄像头指令信息
         //upper 7F YY 99 A2 B3 C4 02 FF 80 A0 CHK CF   7F YY 99 A2 B3 C4 02 FF 80 A1 ZZ CHK CF
@@ -569,14 +652,24 @@ int Ops_WriteFiles(COMDEV *pstComDev)
     }
     PUB_SS.PostTotalPkgNum(g_nTotalPkgNum);
     HHT_LOG(EN_INFO, "PUB_SS->>PostTotalPkgNum: (%d)",g_nTotalPkgNum);
-    //    HHT_LOG(EN_INFO, " -----------OPS SEND FILE NAME INFO-----------");
     g_nCurrentPkgNum = 0;
+
     for (i=0; i<g_nFileNum; i++)
     {
-        //         HHT_LOG(EN_INFO, "  OPS START SEND TO ANDROID--> (%d)",i);
+        HHT_LOG(EN_INFO, "++++++++++++Strat sending file names");
+        /*OPS向Android传输文件名*/
         /*OPS向Android传送文件名且开始传输文件*/
         memset(acSndBuf, 0, sizeof(acSndBuf));
         acSndBuf[0] = COM_HEADER;
+        HHT_LOG(EN_INFO,"1.///////////////////////////////////////////file name length:[%d]////////////////////////////////////",g_listFilesName[i].size());
+#if 1
+        if(g_listFilesName[i].size()>COM_VALID_DATA_LEN)
+        {
+                g_nWriteStatus = -100;
+                PUB_SS.PostFileNameTooLong();
+                Pub_MSleep(100);
+                return g_nWriteStatus;
+        }
         nDataLen = 6 + 2 + 2 + g_listFilesName[i].size() + 1; //YY数据长度(命令标识+命令码+总包数+文件名+校验位)
         acSndBuf[1] = nDataLen;
         memcpy(&acSndBuf[2], acCmdSign, 6);
@@ -595,10 +688,12 @@ int Ops_WriteFiles(COMDEV *pstComDev)
         }
         acSndBuf[10] = nTotalPkgNum % 0x100;
         acSndBuf[11] = nTotalPkgNum / 0x100;
+
         for (j=0; j<g_listFilesName[i].size(); j++)
         {
             acSndBuf[12+j] = g_listFilesName[i][j];
         }
+
         ucChecksum = 0;
         for (j=1; j<nDataLen+1; j++)
         {
@@ -610,7 +705,7 @@ int Ops_WriteFiles(COMDEV *pstComDev)
         while (nWriteMaxCount > nRetrytimes)
         {
             nRet = Com_Write(pstComDev, acSndBuf, nDataLen+3);
-            //              HHT_LOG(EN_INFO, "  START WRITE FILE COMMAND (%s)", Pub_ConvertHexToStr(acSndBuf, nDataLen+3));
+            // HHT_LOG(EN_INFO, "  START WRITE FILE COMMAND (%s)", Pub_ConvertHexToStr(acSndBuf, nDataLen+3));
             if (RET_SUCCESS != nRet)
             {
                 nRetrytimes++;
@@ -629,7 +724,35 @@ int Ops_WriteFiles(COMDEV *pstComDev)
             HHT_LOG(EN_INFO, "======Write status(%d)===== ",g_nWriteStatus);
             return g_nWriteStatus;
         }
-        // HHT_LOG(EN_INFO, " --------------OPS SEND FILE CONTANT INFO-------------");
+#else
+        QList <unsigned char> listFileData = g_listAllFilesData[i];
+        if (listFileData.size() % COM_VALID_DATA_LEN)
+        {
+            nTotalPkgNum = listFileData.size() / COM_VALID_DATA_LEN+1;
+            nLastPkgDataNum = listFileData.size() % COM_VALID_DATA_LEN;
+        }
+        else
+        {
+            nTotalPkgNum = listFileData.size() / COM_VALID_DATA_LEN;
+            nLastPkgDataNum = COM_VALID_DATA_LEN;
+        }
+        int nTotalFileNameNum =0 , nLastFileNameNum=0;
+        QList<unsigned char>listFileName  =g_listFilesName[i];
+        if(listFileName.size()%COM_VALID_DATA_LEN)
+        {
+              nTotalFileNameNum  = listFileName.size()/COM_VALID_DATA_LEN +1;
+              nLastFileNameNum   = listFileName.size()%COM_VALID_DATA_LEN;
+        }
+        else
+        {
+             nTotalFileNameNum  = listFileName.size()/COM_VALID_DATA_LEN;
+             nLastFileNameNum   = COM_VALID_DATA_LEN;
+        }
+        //TODO
+#endif
+
+        HHT_LOG(EN_INFO, "++++++++++++Strat sending file content");
+
         /*OPS向Android传输文件内容*/
         for (j=0; j<nTotalPkgNum; j++)
         {
@@ -694,10 +817,21 @@ int Ops_WriteFiles(COMDEV *pstComDev)
                 PUB_SS.PostCurrentPkgNum(g_nCurrentPkgNum);
             }
         }
-        //        HHT_LOG(EN_INFO, " --------OPS SEND FILE NAME INFO END--------");
+
+        HHT_LOG(EN_INFO, " ++++++++++++Strat sending tanslate file stop commands");
         /*OPS向Android传输文件名且停止传输文件*/
         memset(acSndBuf, 0, sizeof(acSndBuf));
         acSndBuf[0] = COM_HEADER;
+        HHT_LOG(EN_INFO,"2.///////////////////////////////////////////file name length:[%d]////////////////////////////////////",g_listFilesName[i].size());
+
+#if 1
+        if(g_listFilesName[i].size()>COM_VALID_DATA_LEN)
+        {
+                g_nWriteStatus = -200;
+                PUB_SS.PostFileNameTooLong();
+                Pub_MSleep(100);
+                return g_nWriteStatus;
+        }
         nDataLen = 6 + 2 + 2 + g_listFilesName[i].size() + 1; //YY数据长度(命令标识+命令码+总包数+文件名+校验位)
         acSndBuf[1] = nDataLen;
         memcpy(&acSndBuf[2], acCmdSign, 6);
@@ -748,7 +882,11 @@ int Ops_WriteFiles(COMDEV *pstComDev)
             return g_nWriteStatus;
         }
     }
-    // HHT_LOG(EN_INFO, " --------OPS SEND FILE INFO LIST END--------");
+#else
+
+#endif
+    HHT_LOG(EN_INFO, " ++++++++++++++Start sending stop command");
+
     /*OPS向Android传送文件列表结束*/
     acSndBuf[0] = COM_HEADER;
     acSndBuf[1] = 0x0B; //YY数据长度
@@ -841,6 +979,15 @@ int OPS_DeleteSingleAppFromAndroid(QString appName)
 
     memset(acSndBuf, 0, sizeof(acSndBuf));
     acSndBuf[0] = COM_HEADER;
+
+    HHT_LOG(EN_INFO,"1.///////////////////////////////////////////file name length:[%d]////////////////////////////////////",fileNameDataList.size());
+    if(fileNameDataList.size()>COM_VALID_DATA_LEN)
+    {
+            PUB_SS.PostFileNameTooLong();
+            Pub_MSleep(100);
+            return -100;
+    }
+
     nDataLen = 6 + 2 + 2 + fileNameDataList.size() + 1; //YY数据长度(命令标识+命令码+总包数+文件名+校验位)
     acSndBuf[1] = nDataLen;
     memcpy(&acSndBuf[2], acCmdSign, 6);
@@ -895,4 +1042,771 @@ int OPS_DeleteSingleAppFromAndroid(QString appName)
         }
     }
     return -1;
+}
+
+void OPS_SndAppToX5X7(int nFileNum, QList<QList<unsigned char> > listAllFilesName)
+{
+        qDebug("===>Syncing [%d] apps to Compatible Mode Device.\n",nFileNum);
+        HHT_LOG(EN_INFO,"===>Sync [%d] apps to Compatible Mode Device.\n",nFileNum);
+        g_nFileNum = nFileNum;
+        g_listFilesName.clear();
+        g_listFilesName = listAllFilesName;
+#if 0
+        for(int i=0;i< g_listFilesName.size();i++)
+        {
+            qDebug("====>The [%d] app \n",i);
+            for(int j=0;j< g_listFilesName.at(i).length();j++)
+            {
+                qDebug("->0x%02x ", g_listFilesName.at(i).at(j));
+            }
+            qDebug("\n");
+        }
+#endif
+        g_nWriteX5X7FileFlag =1;
+}
+
+int Ops_WriteX5X7Files(COMDEV *pstComDev)
+{
+    UINT16 checksum = 0;
+    UINT16 cmdlength = 0;
+    int nRet=-1;
+    const INT32 nWriteMaxCount = 3;
+    UINT8 acSndBuf[256] = {0,};
+    UINT8 acCmdHeader[2] = {0xaa,0x55};
+    UINT8 acCmdEnder[2] = {0x55,0xaa};
+    UINT8 acCmdSnderOps[3] = {0x02, 0x00, 0x03};            //发送者标识 发送给Android
+    UINT8 acCmdSnderID[1]={0x00};
+    UINT8 acCmdSnderAndroid[3] = {0x01, 0x00, 0x03};    //发送者标识 发送给OPS
+    if(pstComDev==NULL)
+    {
+        HHT_LOG(EN_INFO, "++++++++Com dev not found++++++\n");
+        return RET_INVALID;
+    }
+    //[aa 55] (26 00) (02 00 03) {30 34 31/A  30 36 33/c  30 36 33/c  30 36 35/e 30 37 33/s  30 37 33/s 30 32 30/空格  30 33 32/2  30 33 30/0  30 33 31/1 30 33 33/3 } (10 06) [55 aa]
+    //TODO
+    //向Android发送数据
+    g_nTotalPkgNum = g_nFileNum;
+    PUB_SS.PostTotalPkgNum(g_nTotalPkgNum);
+    HHT_LOG(EN_INFO, "PUB_SS->>PostTotalPkgNum: (%d)",g_nTotalPkgNum);
+    qDebug("PUB_SS->>PostTotalPkgNum: (%d) [size:%d]",g_nTotalPkgNum,g_listFilesName.size());
+    g_nCurrentPkgNum = 0;
+    Pub_MSleep(1000);//睡眠一段时间等待设置上传最大值
+    PUB_SS.PostTotalPkgNum(g_nTotalPkgNum);
+    for(int i=0;i<g_nTotalPkgNum;i++)
+    {
+        //逐个应用名字数据写入串口
+        UINT8 acSndBufTemp[256] = {0,};
+        cmdlength= g_listFilesName.at(i).length()+6;
+        //(checksum)&0xFF,(checksum>>8)&0xFF
+        UINT8 acCmdLength[2] ={0,};
+        acCmdLength[0]= cmdlength&0xFF;
+        acCmdLength[1]= (cmdlength>>8)&0xFF;
+        qDebug("cmdlength: [0x%02x 0x%02x]",acCmdLength[0],acCmdLength[1]);
+        checksum =acCmdLength[0]+acCmdLength[1]+acCmdSnderOps[0]+acCmdSnderOps[1]+acCmdSnderOps[2];
+        for(int j=0;j<g_listFilesName.at(i).length();j++)
+        {
+            checksum+=g_listFilesName.at(i).at(j);
+            acSndBufTemp[j]=g_listFilesName.at(i).at(j);
+            //qDebug("0x%02x ",g_listFilesName.at(i).at(j));
+        }
+        //qDebug("===========================================================================\n");
+        UINT8 acCmdCheckSum[2]={0,};
+        acCmdCheckSum[0]=checksum&0xFF;
+        acCmdCheckSum[1]=(checksum>>8)&0xFF;
+        qDebug("checksum: [0x%02x 0x%02x]",acCmdCheckSum[0],acCmdCheckSum[1]);
+        memcpy(acSndBuf,acCmdHeader,2);
+        memcpy(&acSndBuf[2],acCmdLength,2);
+        memcpy(&acSndBuf[3],"\x00",1);
+        memcpy(&acSndBuf[5],acCmdSnderOps,3);
+        memcpy(&acSndBuf[8],acSndBufTemp,g_listFilesName.at(i).length());
+        memcpy(&acSndBuf[8+g_listFilesName.at(i).length()],acCmdCheckSum,2);
+        memcpy(&acSndBuf[10+g_listFilesName.at(i).length()],acCmdEnder,2);
+        int one_msg_length=2+2+1+3+g_listFilesName.at(i).length()+2+2;
+        HHT_LOG(EN_INFO,"===Snder data to uart(%d)[%s]",one_msg_length,Pub_ConvertHexToStr(acSndBuf,one_msg_length));
+        qDebug("===Snder data to uart(%d):[%s]",one_msg_length,Pub_ConvertHexToStr(acSndBuf,one_msg_length));
+        //开始写入
+#if 0
+        int nRetrytimes =0;
+        while (nWriteMaxCount > nRetrytimes)
+        {
+            nRet = X5X7Com_Write(pstComDev, acSndBuf, one_msg_length);
+            HHT_LOG(EN_INFO, "START SENDE SNDBUF TO UART[%d] (%s)",one_msg_length, Pub_ConvertHexToStr(acSndBuf, one_msg_length));
+            qDebug("START SENDE SNDBUF TO UART[%d] (%s)",one_msg_length, Pub_ConvertHexToStr(acSndBuf, one_msg_length));
+            if (RET_SUCCESS != nRet)
+            {
+                nRetrytimes++;
+                Pub_MSleep(1);
+                continue;
+            }
+            else
+            {
+                break;
+            }
+            Pub_MSleep(100);
+        }
+#else
+        for(int i=0;i<one_msg_length;i++)
+        {
+            nRet = X5X7Com_Write(pstComDev, &acSndBuf[i], 1);
+            if (RET_SUCCESS != nRet)
+            {
+                Pub_MSleep(1);
+                continue;
+            }
+            else
+            {
+                HHT_LOG(EN_INFO, "START SENDE SNDBUF TO UART BY BYTE[%d] (0x%02x)",1, acSndBuf[i]);
+                qDebug("START SENDE SNDBUF TO UART BY BYTE[%d] (0x%02x)",i, acSndBuf[i]);
+            }
+            Pub_MSleep(10);
+        }
+        HHT_LOG(EN_INFO, "===================SENDER END==========================");
+        qDebug("===================SENDER END==========================");
+#endif
+        if (RET_SUCCESS != nRet)
+        {
+            g_nWriteStatus = -100;
+            HHT_LOG(EN_INFO, "======X5 X7 Write status(%d)===== ",g_nWriteStatus);
+            qDebug("======X5 X7 Write status(%d)===== ",g_nWriteStatus);
+            g_nTotalPkgNum = 0;
+            return g_nWriteStatus;
+        }
+        else
+        {
+            g_nCurrentPkgNum++;
+            PUB_SS.PostCurrentPkgNum(g_nCurrentPkgNum);
+            HHT_LOG(EN_INFO, "PUB_SS->>PostCurrentPkgNum: (%d)\n",g_nCurrentPkgNum);
+            qDebug("PUB_SS->>PostCurrentPkgNum: (%d)\n",g_nCurrentPkgNum);
+        }
+        checksum =0;
+        cmdlength =0;
+        memset(acSndBuf,0,sizeof(acSndBuf));
+        Pub_MSleep(100);
+    }
+    g_nCurrentPkgNum =0;
+    g_nTotalPkgNum = 0;
+    g_listFilesName.clear();
+    g_nWriteStatus = 0; //success
+    return g_nWriteStatus; //default -1
+}
+
+THREADRETURN X5X7OpsCom_ThreadFn(void *pParam)
+{
+     UINT8 acRcvBuf[256] = {0,};
+     UINT8 acAppName[128] = {0,};
+     UINT8 acCmdSnderOps[3] = {0x02, 0x00, 0x03};            //发送者标识 发送给Android
+     UINT8 acCmdSnderAndroid[3] = {0x10, 0x00, 0x03};      //发送者标识  发送给OPS
+     UINT8 acHandShakeBuf[]={0xaa,0x55,0x1a,0x00,0x4a,0x10,0x00,0x03,0x30,0x30,0x36,0x38 ,0x30,0x30,
+                0x36,0x35,0x30,0x30,0x36,0x31,0x30,0x30,0x37,0x32,0x30,0x30,0x37,0x34 ,0x6b,0x04,0x55,0xaa };//类似x5x7握手指令Android->OPS
+     UINT8 acHandShakeSndBuf[]={0xaa,0x55,0x1a,0x00,0x00,0x02,0x00,0x03,0x30,0x30,0x36,0x38,0x30,0x30,
+                0x36,0x35,0x30,0x30,0x36,0x31,0x30,0x30,0x37,0x32,0x30,0x30,0x37,0x34 ,0x13,0x04,0x55,0xaa};//类似x5x7握手指令OPS->Android
+     int        nDataLen =0 ,nAppNameLen =0,nShakeTimes=0;
+    while (1)
+    {
+        if(nShakeTimes>=1)
+        {
+            g_nX5X7HandShakeFlag=-1;
+        }
+        if(1==g_nX5X7HandShakeFlag)
+        {
+            //0x68 0x65 0x61 0x72 0x74 心跳包指令->heart
+#if 1
+            int nRet = g_stComDev.WriteCom(acHandShakeSndBuf,sizeof(acHandShakeSndBuf));
+            if(nRet<=0)
+            {
+                HHT_LOG(EN_INFO, "[Compatible Mode]: Ops write handshake to Android failed");
+                qDebug("[Compatible Mode]: Ops write handshake to Android failed");
+            }
+            nShakeTimes++;
+#endif
+        }
+        if(1==g_nWriteX5X7FileFlag)
+        {
+            //X5 X7 Frimware status
+           int  nRet = Ops_WriteX5X7Files(&g_stComDev);
+            if(RET_SUCCESS!=nRet)
+            {
+                HHT_LOG(EN_ERR, "[Compatible Mode]: Ops write files to Android failed");
+                qDebug("[Compatible Mode]: Ops write files to Android failed");
+                PUB_SS.PostSendFileToAndroidFailed();//
+            }
+            else
+            {
+                HHT_LOG(EN_INFO, "[Compatible Mode]: Ops write files to Android success");
+                qDebug("[Compatible Mode]: Ops write files to Android success");
+            }
+            g_nWriteX5X7FileFlag=-1;
+        }
+        //read data from com[data from x5/x7 android]
+        memset(acRcvBuf,0,sizeof(acRcvBuf));
+        int nRet = g_stComDev.ReadX5X7ComByHeader(acRcvBuf,sizeof(acRcvBuf));
+        if(nRet>0)
+        {
+            HHT_LOG(EN_INFO, "===>ReadX5X7ComByHeader status:[%d]\n",nRet);
+            HHT_LOG(EN_INFO, "===>Get Android data through serial port (%d)[%s]\n",nRet, Pub_ConvertHexToStr(acRcvBuf,nRet));
+            if((0==memcmp(&acRcvBuf[0],"\xaa\x55",2))&&(0==memcmp(&acRcvBuf[5],"\x10\x00\x03",3))&&
+               (0==memcmp(&acRcvBuf[8],&acHandShakeBuf[8],20))&&(0==memcmp(&acRcvBuf[30],"\x55\xaa",2)))
+            {
+                g_nX5X7HandShakeFlag =-1;
+                HHT_LOG(EN_INFO, "===>Get Android Handshake return success\n");
+                continue;
+            }
+            int length = (int)((acRcvBuf[2]&0x00FF)|(acRcvBuf[3]<<8&0xFF00));
+            HHT_LOG(EN_INFO, " ++++++acRvBuf[0]:0x%02x acRvBuf[1]:0x%02x  length:[%d] acRcvBuf[ender-1]:0x%02x acRcvBuf[ender]:0x%02x \n",
+                   acRcvBuf[0],acRcvBuf[1],length,acRcvBuf[length+4],acRcvBuf[length+5]);
+            if((0==memcmp(&acRcvBuf[0],"\xaa\x55",2))&&(0==memcmp(&acRcvBuf[5],acCmdSnderAndroid,3))
+                    &&(0==memcmp(&acRcvBuf[length+4],"\x55\xaa",2)))
+            {
+                //[aa 55] (32 00)  (43) (10 00 03) {30 30 34 31/A  30 30 36 33/c  30 30 36 33/c  30 30 36 35/e 30 30 37 33/s
+                //30 30 37 33/s 30 30 32 30/空格  30 30 33 32/2  30 30 33 30/0  30 30 33 31/1 30 30 33 33/3 }(12 09) [55 aa]
+                nDataLen = (int)((acRcvBuf[2]&0x00FF)|(acRcvBuf[3]<<8&0xFF00));
+                HHT_LOG(EN_INFO, "  X5X7 sendbuf  [0x%x 0x%x]=(%d)[%s]\n",acRcvBuf[2],acRcvBuf[3],nDataLen, Pub_ConvertHexToStr(acRcvBuf,nDataLen+6));
+                nAppNameLen = (nDataLen -6)/4;    //应用名称长度=(数据长度-6)/4
+#if 0
+                unsigned char* dealAppName = hhtHelper::data_decrypt_default(&acRcvBuf[8],(nDataLen -6));
+                HHT_LOG(EN_INFO, "  X5X7 sendbuf app (%d)[%s]\n",nDataLen, dealAppName);
+                memcpy(acAppName,dealAppName, nAppNameLen);
+
+                QByteArray baAppName;
+                baAppName.clear();
+                for (int i=0; i<nAppNameLen; i++)
+                {
+                    baAppName.append(acAppName[i]);
+                }
+                QString strAppName = QString::fromLocal8Bit(baAppName);
+                HHT_LOG(EN_INFO, "  app name (%s)", strAppName.toLocal8Bit().data());
+                HHT_LOG(EN_INFO, "  app byte array name(%s)", baAppName.data());
+                /*notice gui to start app*/
+                PUB_SS.PostOpenAppX5X7(strAppName);//qstring
+                memset(acAppName,0,sizeof(acAppName));
+                if(dealAppName!=NULL)
+                {
+                    free(dealAppName);
+                    dealAppName==NULL;
+                }
+#else
+                QString uAppName = hhtHelper::data_decrypt(&acRcvBuf[8],(nDataLen -6));
+                QByteArray uApp = uAppName.toLatin1();
+                HHT_LOG(EN_INFO, "  get uApp Name (%s)", uApp.data());
+                QString  openAppName = hhtHelper::fromUtf16(uAppName);
+                HHT_LOG(EN_INFO, "  emit to open App Name (%s)", openAppName.toStdString().c_str());
+                /*notice gui to start app*/
+                PUB_SS.PostOpenAppX5X7(openAppName);    //qstring
+#endif
+            }
+        }
+        Pub_MSleep(10);
+    }
+}
+
+THREADRETURN distinguish_device(void *pParam)
+{
+    Q_UNUSED(pParam);
+#if 1
+    int *handshake_return;
+    VOS_INT8 acDevName[DEV_MAX_PATH_LEN] = {0,};
+    handshake_return = get_handshake_status();
+    qDebug("Handshake Status:[%d] [%d]\n",handshake_return[0],handshake_return[1]);
+    HHT_LOG(EN_INFO,"Handshake Status:[%d] [%d]\n",handshake_return[0],handshake_return[1]);
+    switch (handshake_return[0])
+    {
+    case -1:// NOT X5/X7 X9
+    {
+        g_stComportInfo.nComNo = 1;
+        g_stComportInfo.nBaudRate =115200;
+        COM_GetComPortNameFromIndex(g_stComportInfo.nComNo, acDevName);
+        if (0 != g_stComDev.IsOpenCom())
+        {
+            g_stComDev.CloseCom();
+            Pub_MSleep(COM_CMD_DELAY_TIME/2);
+        }
+        int nRet = g_stComDev.OpenCom(acDevName, g_stComportInfo.nBaudRate);
+        if(nRet ==RET_SUCCESS)
+        {
+            PUB_SS.PostOpenComSuccess();
+            qDebug("NOT X5/X7 X9 SELECT COM[%d](%s)",g_stComportInfo.nBaudRate ,acDevName);
+            HHT_LOG(EN_INFO,"NOT X5/X7 X9 SELECT COM[%d](%s)",g_stComportInfo.nBaudRate ,acDevName);
+            Pub_MSleep(COM_CMD_DELAY_TIME/2);
+        }
+        else
+        {
+            PUB_SS.PostOpenComFailed();
+            Pub_MSleep(COM_CMD_DELAY_TIME/2);
+        }
+        vos_pthread_t opsThreadID;
+        nRet = VOS_CreateThread(&opsThreadID, X5X7OpsCom_ThreadFn, NULL);
+        if (RET_SUCCESS != nRet)
+        {
+            HHT_LOG(EN_ERR, "+++++++++++create Compatible Mode ops_com_thread failed++++++++++");
+            qDebug("+++++++++++create Compatible Mode ops_com_thread failed++++++++++");
+        }
+        else
+        {
+            HHT_LOG(EN_ERR, "++++++++++create Compatible Mode ops_com_thread success++++++++++");
+            qDebug("++++++++++create Compatible Mode ops_com_thread success+++++++++++");
+        }
+    }
+        break;
+    case 0://GET X9
+    {
+        PUB_SS.PostOpenComSuccess();
+        Pub_MSleep(COM_CMD_DELAY_TIME/2);
+        PUB_SS.PostOpenComSuccess();
+        vos_pthread_t opsThreadID;
+        int nRet = VOS_CreateThread(&opsThreadID, OpsCom_ThreadFn, NULL);
+        if (RET_SUCCESS != nRet)
+        {
+            HHT_LOG(EN_ERR, "++++++++++++++create x9 ops_com_thread failed++++++++++++++");
+            qDebug("++++++++++++++create x9 ops_com_thread failed++++++++++++++");
+        }
+        else
+        {
+            HHT_LOG(EN_ERR, "+++++++++++++++create x9 ops_com_thread success+++++++++++++++");
+            qDebug("+++++++++++++++create x9 ops_com_thread success+++++++++++++++");
+        }
+    }
+        break;
+    case 1://GET X5/X7
+    {
+        PUB_SS.PostOpenComSuccess();
+        Pub_MSleep(COM_CMD_DELAY_TIME/2);
+        vos_pthread_t opsThreadID;
+        PUB_SS.PostOpenComSuccess();
+        int nRet = VOS_CreateThread(&opsThreadID, X5X7OpsCom_ThreadFn, NULL);
+        if (RET_SUCCESS != nRet)
+        {
+            HHT_LOG(EN_ERR, "+++++++++++create Compatible Mode ops_com_thread failed++++++++++");
+            qDebug("+++++++++++create Compatible Mode ops_com_thread failed++++++++++");
+        }
+        else
+        {
+            HHT_LOG(EN_ERR, "++++++++++create Compatible Mode ops_com_thread success++++++++++");
+            qDebug("++++++++++create Compatible Mode ops_com_thread success+++++++++++");
+        }
+    }
+        break;
+    default://GET X5/X7
+    {
+        g_stComportInfo.nComNo = 2;
+        g_stComportInfo.nBaudRate =115200;
+        COM_GetComPortNameFromIndex(g_stComportInfo.nComNo, acDevName);
+        if (0 != g_stComDev.IsOpenCom())
+        {
+            g_stComDev.CloseCom();
+            Pub_MSleep(COM_CMD_DELAY_TIME/2);
+        }
+        int nRet = g_stComDev.OpenCom(acDevName, g_stComportInfo.nBaudRate);
+        if(nRet ==RET_SUCCESS)
+        {
+            PUB_SS.PostOpenComSuccess();
+            qDebug("DEFAULT SELECT COM[%d](%s)",g_stComportInfo.nBaudRate ,acDevName);
+            HHT_LOG(EN_INFO,"DEFAULT X5/X7 X9 SELECT COM[%d](%s)",g_stComportInfo.nBaudRate ,acDevName);
+            Pub_MSleep(COM_CMD_DELAY_TIME/2);
+        }
+        else
+        {
+            PUB_SS.PostOpenComFailed();
+            Pub_MSleep(COM_CMD_DELAY_TIME/2);
+        }
+        vos_pthread_t opsThreadID;
+        nRet = VOS_CreateThread(&opsThreadID, X5X7OpsCom_ThreadFn, NULL);
+        if (RET_SUCCESS != nRet)
+        {
+            HHT_LOG(EN_ERR, "+++++++++++create Compatible Mode ops_com_thread failed++++++++++");
+            qDebug("+++++++++++create Compatible Mode ops_com_thread failed++++++++++");
+        }
+        else
+        {
+            HHT_LOG(EN_ERR, "++++++++++create Compatible Mode ops_com_thread success++++++++++");
+            qDebug("++++++++++create Compatible Mode ops_com_thread success+++++++++++");
+        }
+    }
+        break;
+    }
+    if(handshake_return!=NULL)//动态分配内存,使用完后立即释放
+    {
+        free(handshake_return);
+        handshake_return =NULL;
+    }
+#else
+    INT32 nRet = -1;
+    INT32 nRetrytimes = 0;
+    VOS_INT8 acDevName[DEV_MAX_PATH_LEN] = {0,};
+    UINT8 acCmdSign[6] = {0x99, 0xA2, 0xB3, 0xC4, 0x02, 0xFF};    //命令标识
+    UINT8 acRcvBuf[COM_DATA_PKG_LEN] = {0,};
+    //
+    memset(acDevName, 0, sizeof(acDevName));
+    nRet = COM_GetComPortNameFromIndex(g_stComportInfo.nComNo, acDevName);
+    if (RET_SUCCESS != nRet)
+    {
+        HHT_LOG(EN_ERR, "Get comport(%d) name failed", g_stComportInfo.nComNo);
+        return (THREADRETURN)1;
+    }
+    if (0 != g_stComDev.IsOpenCom())
+    {
+        g_stComDev.CloseCom();
+        Pub_MSleep(COM_CMD_DELAY_TIME);
+    }
+    //
+    for (;;)
+    {
+        if(1==g_nIsAppQuit)
+        {
+            HHT_LOG(EN_INFO," Exit Ops com Thread");
+            break;
+        }
+        nRet = g_stComDev.OpenCom(acDevName, g_stComportInfo.nBaudRate);
+        if (RET_SUCCESS != nRet)
+        {
+            HHT_LOG(EN_ERR, "Open com (%s) failed", acDevName);
+            PUB_SS.PostOpenComFailed();
+            Pub_MSleep(1);
+            continue;
+        }
+        else
+        {
+            PUB_SS.PostOpenComSuccess();
+            break;
+        }
+    }
+    HHT_LOG(EN_ERR, "Open com (%s) [%d] success", acDevName,g_stComportInfo.nBaudRate);
+    while (1)
+    {
+        //X9 firmware check commands
+#if 1
+        if(g_nX9FirmwareCheckFlag ==1)
+        {
+            UINT8 mSndBuf[13]= {0x7F,0x09,0x99,0xA2,0xB3,0xC4,0x02,0xFF,0x93,0xA0,0xEF,0xCF};
+            int Ret= g_stComDev.WriteCom(mSndBuf,13);
+            if(Ret==0)
+            {
+                continue;
+                HHT_LOG(EN_INFO, "[%d]Write request check x9 firmware status commands failed.",nRetrytimes+1);
+                qDebug("[%d]Write request check x9 firmware status commands failed.",nRetrytimes+1);
+            }
+            else
+            {
+                HHT_LOG(EN_INFO, "[%d]Write request check x9 firmware status commands success.",nRetrytimes+1);
+                qDebug("[%d]Write request check x9 firmware status commands success.",nRetrytimes+1);
+            }
+            Pub_MSleep(200);
+        }
+#endif
+        //
+        memset(acRcvBuf, 0, sizeof(acRcvBuf));
+        nRet = g_stComDev.ReadComByHeader(acRcvBuf,COM_DATA_PKG_LEN);//read commands
+        if (0 >= nRet)
+        {
+            nRetrytimes++;
+            if(nRetrytimes>=10)//超过10次还没有收到消息
+                break;
+            Pub_MSleep(10);
+            continue;
+        }
+
+        HHT_LOG(EN_INFO, " ==> distinguish get data(%s)", Pub_ConvertHexToStr(acRcvBuf, COM_DATA_PKG_LEN/4));
+        qDebug(" ==> distinguish get data(%s)", Pub_ConvertHexToStr(acRcvBuf, COM_DATA_PKG_LEN/4));
+
+        //接受来自Android的X9 firmware响应
+        if((COM_HEADER ==acRcvBuf[0])&&(0 == memcmp(&acRcvBuf[2], acCmdSign, 6))
+                &&(0x93 == acRcvBuf[8]) && (0xA1 == acRcvBuf[9])&&(0x00 == acRcvBuf[10]))
+        {
+            HHT_LOG(EN_INFO, "Received X9 Firmware check echo from Android.");
+            PUB_SS.PostX9FirmwareCheck();//发送X9固件确认信号
+            g_nX9FirmwareCheckFlag =-1;
+            break;
+        }
+    }//while(1)
+
+    HHT_LOG(EN_INFO,"+++++++++++++++++++select thread to run+++++++++++++++++++++++");
+    qDebug()<<"+++++++++++++++++++select thread to run+++++++++++++++++++++++";
+    HHT_LOG(EN_INFO,"status:[%d],flags[%d]",g_nX9FirmwareCheckStatus,g_nX9FirmwareCheckFlag);
+    qDebug("=======>status:[%d],flags[%d]",g_nX9FirmwareCheckStatus,g_nX9FirmwareCheckFlag);
+    if(g_nX9FirmwareCheckStatus||(g_nX9FirmwareCheckFlag==-1))//X9
+    {
+        //X9/X8/X6
+        //TODO thread
+        vos_pthread_t opsThreadID;
+        nRet = VOS_CreateThread(&opsThreadID, OpsCom_ThreadFn, NULL);
+        if (RET_SUCCESS != nRet)
+        {
+            HHT_LOG(EN_ERR, "++++++++++++++create x9 ops_com_thread failed++++++++++++++");
+            qDebug("++++++++++++++create x9 ops_com_thread failed++++++++++++++");
+        }
+        else
+        {
+            HHT_LOG(EN_ERR, "+++++++++++++++create x9 ops_com_thread success+++++++++++++++");
+            qDebug("+++++++++++++++create x9 ops_com_thread success+++++++++++++++");
+        }
+    }
+    else
+    {
+        //X5/X7
+        //TODO thread
+        //关闭X9配置文件串口,打开X5/X7通讯串口设备
+        if(g_stComDev.IsOpenCom())
+        {
+            int result = g_stComDev.CloseCom();
+            if(RET_SUCCESS==result)
+            {
+                HHT_LOG(EN_ERR, "Select Compatible Mode device,Try to close X9 serial device.");
+                qDebug("Select Compatible Mode device,Try to close X9 serial device.");
+                g_stComportInfo.nComNo = 2;
+                g_stComportInfo.nBaudRate = 115200;
+                Pub_MSleep(COM_CMD_DELAY_TIME);
+
+                memset(acDevName, 0, sizeof(acDevName));
+                nRet = COM_GetComPortNameFromIndex(g_stComportInfo.nComNo, acDevName);
+                if (RET_SUCCESS != nRet)
+                {
+                    HHT_LOG(EN_ERR, "X5/X7 Get comport(%d) name failed", g_stComportInfo.nComNo);
+                    return (THREADRETURN)1;
+                }
+                if (0 != g_stComDev.IsOpenCom())
+                {
+                    g_stComDev.CloseCom();
+                    Pub_MSleep(COM_CMD_DELAY_TIME);
+                }
+                int  error_count=0;
+                for (;;)
+                {
+                    if(1==g_nIsAppQuit)
+                    {
+                        HHT_LOG(EN_INFO," Exit Ops com Thread");
+                        break;
+                    }
+                    nRet = g_stComDev.OpenCom(acDevName, g_stComportInfo.nBaudRate);
+                    if (RET_SUCCESS != nRet)
+                    {
+                        PUB_SS.PostOpenComFailed();
+                        error_count++;
+                        if(error_count<10)
+                        {
+                            HHT_LOG(EN_ERR, "Compatible Mode Open com (%s) [%d] failed", acDevName,g_stComportInfo.nBaudRate);
+                            qDebug("Compatible Mode Open com (%s) [%d] failed", acDevName,g_stComportInfo.nBaudRate);
+                        }
+                        if(error_count==10)
+                        {
+                            HHT_LOG(EN_ERR, "+++++++++I am ganna fucking terminate to record errors.++++++++");
+                            qDebug("+++++++++I am ganna fucking terminate to record errors.+++++++++");
+                        }
+                        Pub_MSleep(1);
+                        continue;
+                    }
+                    else
+                    {
+                        PUB_SS.PostOpenComSuccess();
+                        break;
+                    }
+                }
+                HHT_LOG(EN_ERR, "Compatible Mode Open com (%s) [%d] success", acDevName,g_stComportInfo.nBaudRate);
+                qDebug("Compatible Mode Open com (%s)[%d] success", acDevName,g_stComportInfo.nBaudRate);
+            }
+        }
+        //===================================================================================
+        vos_pthread_t opsThreadID;
+        nRet = VOS_CreateThread(&opsThreadID, X5X7OpsCom_ThreadFn, NULL);
+        if (RET_SUCCESS != nRet)
+        {
+            HHT_LOG(EN_ERR, "+++++++++++create Compatible Mode ops_com_thread failed++++++++++");
+            qDebug("+++++++++++create Compatible Mode ops_com_thread failed++++++++++");
+        }
+        else
+        {
+            HHT_LOG(EN_ERR, "++++++++++create Compatible Mode ops_com_thread success++++++++++");
+            qDebug("++++++++++create Compatible Mode ops_com_thread success+++++++++++");
+        }
+    }
+
+#endif
+    return 0;
+}
+/**
+ * @brief get_handshake_status
+ * @return
+ * handshake_return[0]
+ * 握手状态 [0]:X9   [1]:X5/X7   [-1]:ERROR
+ * handshake_return[1]
+ * 串口index
+ */
+int* get_handshake_status()
+{
+    //握手状态 [0]:X9 [1]:X5/X7 [-1]:ERROR
+    static int handshake_status =-1;
+    static int com_index = -1; //串口序列号
+    //动态分配内存,使用完后强制释放
+    int  *handshake_return=(int*)malloc(2*sizeof(int)); //handshake_return[0]: 握手状态  handshake_return[1]:串口序列号
+    memset(handshake_return,-1,sizeof(handshake_return));
+    INT32 nRetrytimes = 0;
+    INT32 nRet = -1;
+    VOS_INT8 acDevName[DEV_MAX_PATH_LEN] = {0,};
+    UINT8 acCmdSign[6] = {0x99, 0xA2, 0xB3, 0xC4, 0x02, 0xFF};    //命令标识
+    UINT8 acRcvBuf[COM_DATA_PKG_LEN] = {0,};
+    UINT8 acRcvBuf2[256] = {0,};
+    //UINT8 acCmdSnderOps[3] = {0x02, 0x00, 0x03};            //发送者标识 发送给Android
+    //UINT8 acCmdSnderAndroid[3] = {0x10, 0x00, 0x03};      //发送者标识  发送给OPS
+    UINT8 acHandShakeBuf[]={0xaa,0x55,0x1a,0x00,0x4a,0x10,0x00,0x03,0x30,0x30,0x36,0x38 ,0x30,0x30,
+                            0x36,0x35,0x30,0x30,0x36,0x31,0x30,0x30,0x37,0x32,0x30,0x30,0x37,0x34 ,0x6b,0x04,0x55,0xaa };//类似x5x7握手指令Android->OPS
+    UINT8 acHandShakeSndBuf[]={0xaa,0x55,0x1a,0x00,0x00,0x02,0x00,0x03,0x30,0x30,0x36,0x38,0x30,0x30,
+                               0x36,0x35,0x30,0x30,0x36,0x31,0x30,0x30,0x37,0x32,0x30,0x30,0x37,0x34 ,0x13,0x04,0x55,0xaa};//类似x5x7握手指令OPS->Android
+    //获取系统所有串口设备
+    QStringList com_list = hhtHelper::get_local_serial_devices();
+    for(int i=0;i<com_list.size();i++)
+    {
+        memset(acDevName, 0, sizeof(acDevName));
+        QString index_string=com_list.at(i).mid(com_list.at(i).length()-1,1);
+        int index = index_string.toInt(0,10);
+        qDebug()<<"==>INDEX["<<index<<"]: "<<"SERIAL DEVICE ("<<com_list.at(i)<<")";
+        QString device = com_list.at(i);
+        HHT_LOG(EN_INFO,"==>INDEX[%d]: SERIAL DEVICE (%s)",index,device.toStdString().c_str());
+        g_stComportInfo.nComNo = index;
+        g_stComportInfo.nBaudRate =115200;
+        nRet = COM_GetComPortNameFromIndex(g_stComportInfo.nComNo, acDevName);
+        if (RET_SUCCESS != nRet)
+        {
+            HHT_LOG(EN_ERR, "Get comport(%d) name failed", g_stComportInfo.nComNo);
+            continue;
+        }
+        else//GET设备成功
+        {
+            if (0 != g_stComDev.IsOpenCom())
+            {
+                g_stComDev.CloseCom();
+                Pub_MSleep(COM_CMD_DELAY_TIME);
+            }
+            nRet = g_stComDev.OpenCom(acDevName, g_stComportInfo.nBaudRate);
+            if(nRet ==RET_SUCCESS)//每一个串口发送两套握手指令
+            {
+                //TODO X9设备握手
+                HHT_LOG(EN_ERR, "==>Open com (%s) [%d] success", acDevName,g_stComportInfo.nBaudRate);
+                while (1)
+                {
+                    //X9 firmware check commands
+                    if(g_nX9FirmwareCheckFlag ==1)
+                    {
+                        UINT8 mSndBuf[13]= {0x7F,0x09,0x99,0xA2,0xB3,0xC4,0x02,0xFF,0x93,0xA0,0xEF,0xCF};
+                        int Ret= g_stComDev.WriteCom(mSndBuf,13);
+                        if(Ret==0)
+                        {
+                            continue;
+                            HHT_LOG(EN_INFO, "[%d]Write request check x9 firmware status commands failed.",nRetrytimes+1);
+                            qDebug("[%d]Write request check x9 firmware status commands failed.",nRetrytimes+1);
+                        }
+                        else
+                        {
+                            HHT_LOG(EN_INFO, "[%d]Write request check x9 firmware status commands success.",nRetrytimes+1);
+                            qDebug("[%d]Write request check x9 firmware status commands success.",nRetrytimes+1);
+                        }
+                        Pub_MSleep(100);
+                    }
+                    //
+                    memset(acRcvBuf, 0, sizeof(acRcvBuf));
+                    nRet = g_stComDev.ReadComByHeader(acRcvBuf,COM_DATA_PKG_LEN);//read commands
+                    if (0 >= nRet)
+                    {
+                        nRetrytimes++;
+                        if(nRetrytimes>=5)//超过5次还没有收到消息
+                            break;
+                        Pub_MSleep(10);
+                        continue;
+                    }
+
+                    HHT_LOG(EN_INFO, " ==> handshake_status get data(%s)", Pub_ConvertHexToStr(acRcvBuf, COM_DATA_PKG_LEN/4));
+                    qDebug(" ==> handshake_status get data(%s)", Pub_ConvertHexToStr(acRcvBuf, COM_DATA_PKG_LEN/4));
+
+                    //接受来自Android的X9 firmware响应
+                    if((COM_HEADER ==acRcvBuf[0])&&(0 == memcmp(&acRcvBuf[2], acCmdSign, 6))
+                            &&(0x93 == acRcvBuf[8]) && (0xA1 == acRcvBuf[9])&&(0x00 == acRcvBuf[10]))
+                    {
+                        HHT_LOG(EN_INFO, "Received X9 Firmware check echo from Android.");
+                        PUB_SS.PostX9FirmwareCheck();//发送X9固件确认信号
+                        g_nX9FirmwareCheckFlag =-1;
+                        break;
+                    }
+                }//while(1) //X9 check
+                if(g_nX9FirmwareCheckStatus||(g_nX9FirmwareCheckFlag==-1))//X9
+                {
+                    handshake_status = 0; //X9
+                    com_index = g_stComportInfo.nComNo; //serial device
+                    handshake_return[0]=handshake_status;
+                    handshake_return[1]=com_index;
+                    qDebug("X9+++Handshake Status:[%d] [%d]",handshake_return[0],handshake_return[1]);
+                    HHT_LOG(EN_INFO,"X9+++Handshake Status:[%d] [%d]",handshake_return[0],handshake_return[1]);
+                    return handshake_return;
+                }
+
+                nRetrytimes=0;//清零
+                //TODO X5/X7设备握手
+                while (1)
+                {
+                    if(1==g_nX5X7HandShakeFlag)
+                    {
+                        //0x68 0x65 0x61 0x72 0x74 心跳包指令->heart
+                        nRet = g_stComDev.WriteCom(acHandShakeSndBuf,sizeof(acHandShakeSndBuf));
+                        if(nRet<=0)
+                        {
+                            continue;
+                            HHT_LOG(EN_INFO, "[Compatible Mode]: Ops write handshake to Android failed[%d].",nRetrytimes+1);
+                            qDebug("[Compatible Mode]: Ops write handshake to Android failed[%d].",nRetrytimes+1);
+                        }
+                        else
+                        {
+                            HHT_LOG(EN_INFO, "[Compatible Mode]: Ops write handshake to Android failed[%d].",nRetrytimes+1);
+                            qDebug("[Compatible Mode]: Ops write handshake to Android failed[%d].",nRetrytimes+1);
+                        }
+                        Pub_MSleep(100);
+                    }
+                    //read data from com[data from x5/x7 android]
+                    memset(acRcvBuf2,0,sizeof(acRcvBuf2));
+                    int nRet = g_stComDev.ReadX5X7ComByHeader(acRcvBuf2,sizeof(acRcvBuf2));
+                    if(nRet>0)
+                    {
+                        HHT_LOG(EN_INFO, "===>ReadX5X7ComByHeader status:[%d]\n",nRet);
+                        HHT_LOG(EN_INFO, "===>Get Android data through serial port (%d)[%s]\n",nRet, Pub_ConvertHexToStr(acRcvBuf2,nRet));
+                        if((0==memcmp(&acRcvBuf2[0],"\xaa\x55",2))&&(0==memcmp(&acRcvBuf2[5],"\x10\x00\x03",3))&&
+                                (0==memcmp(&acRcvBuf2[8],&acHandShakeBuf[8],20))&&(0==memcmp(&acRcvBuf2[30],"\x55\xaa",2)))
+                        {
+                            g_nX5X7HandShakeFlag =-1;
+                            HHT_LOG(EN_INFO, "===>Get Android Handshake return success\n");
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        nRetrytimes++;
+                        if(nRetrytimes>=5)//超过5次还没有收到消息
+                            break;
+                        Pub_MSleep(10);
+                        continue;
+                    }
+                    Pub_MSleep(20);
+                }//while(1) //X5/X7 check
+                if(g_nX5X7HandShakeFlag ==-1)
+                {
+                    handshake_status = 1; //X5/X7
+                    com_index = g_stComportInfo.nComNo; //serial device
+                    handshake_return[0]=handshake_status;
+                    handshake_return[1]=com_index;
+                    qDebug("X5/X7+++Handshake Status:[%d] [%d]",handshake_return[0],handshake_return[1]);
+                    HHT_LOG(EN_INFO,"X5/X7+++Handshake Status:[%d] [%d]",handshake_return[0],handshake_return[1]);
+                    return handshake_return;
+                }
+            }
+            else
+            {
+                HHT_LOG(EN_ERR, "==>Open comport(%d)[%s] failed", g_stComportInfo.nComNo,g_stComportInfo.nBaudRate);
+                g_stComDev.CloseCom();
+                Pub_MSleep(COM_CMD_DELAY_TIME/2);
+                continue;
+            }
+            g_stComDev.CloseCom();
+            Pub_MSleep(COM_CMD_DELAY_TIME/2);
+        }
+    }
+    handshake_return[0]=-1;
+    handshake_return[1]=-1;
+    qDebug("ERROR+++Handshake Status:[%d] [%d]",handshake_return[0],handshake_return[1]);
+    HHT_LOG(EN_INFO,"ERROR+++Handshake Status:[%d] [%d]",handshake_return[0],handshake_return[1]);
+    qDebug()<<"++++++++++++++++++FUCK YOU ALL+++++++++++++++++";
+    return  handshake_return;
 }

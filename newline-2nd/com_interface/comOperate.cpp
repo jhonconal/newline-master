@@ -5,9 +5,6 @@
 #include "comOperate.h"
 #include <QDebug>
 #include <QMessageBox>
-//#include <QSqlDatabase>
-//#include <QSqlError>
-//#include <QSqlQuery>
 #include <QDir>
 #include <QFile>
 
@@ -73,21 +70,21 @@ INT32 Com_Write(COMDEV * pstComDev, UINT8* pcSndBuf, INT32 nLen)
     {
         return RET_INVALID;
     }
-
+    HHT_LOG(EN_INFO, "FUCK++++++++++++++++++++++++++(%s)",Pub_ConvertHexToStr(pcSndBuf, nLen));//
     //write
     memset(acRcvBuf, 0, sizeof(acRcvBuf));
     nRet = COM_SndCmdPkg(pstComDev, pcSndBuf, acRcvBuf, nLen, COM_CMD_DELAY_TIME);
     if (RET_SUCCESS != nRet)
     {
-        HHT_LOG(EN_ERR, "write (%s) failed", Pub_ConvertHexToStr(pcSndBuf, nLen));
+        HHT_LOG(EN_ERR, "com_write (%s) failed", Pub_ConvertHexToStr(pcSndBuf, nLen));
         return RET_FAILURE;
     }
-    HHT_LOG(EN_INFO, " write (%s) ok", Pub_ConvertHexToStr(pcSndBuf, nLen));
+    HHT_LOG(EN_INFO, "com_write (%s) ok", Pub_ConvertHexToStr(pcSndBuf, nLen));
 
 //    Pub_MSleep(COM_CMD_DELAY_TIME);
 //    HHT_LOG(EN_INFO, "  read again to check");
     ucCheckSum = 0;
-    HHT_LOG(EN_INFO, "  read again to check contant(%s)",Pub_ConvertHexToStr(acRcvBuf, nLen+1));//---------->回读成功
+    HHT_LOG(EN_INFO, "read again to check contant(%s)",Pub_ConvertHexToStr(acRcvBuf, nLen+1));//---------->回读成功
     nDataLen = acRcvBuf[1];
     if ((acRcvBuf[0]==pcSndBuf[0])&&(0==memcmp(&pcSndBuf[2],&acRcvBuf[2],7)) && (0xA1 == acRcvBuf[9]) && (0x00 == acRcvBuf[10])
         && (0 == memcmp(&pcSndBuf[10], &acRcvBuf[11], 2)) && (0xCF == acRcvBuf[nDataLen+2]))
@@ -104,6 +101,30 @@ INT32 Com_Write(COMDEV * pstComDev, UINT8* pcSndBuf, INT32 nLen)
         }
     }
     return RET_FAILURE;
+}
+
+INT32 X5X7Com_Write(COMDEV *pstComDev, UINT8 *pcSndBuf, INT32 nLen)
+{
+    INT32 i = 0;
+    INT32 nRet = 0;
+    INT32 nDataLen = 0;
+    UINT8 acRcvBuf[COM_DATA_PKG_LEN] = {0,};
+    UINT8 ucCheckSum = 0;
+
+    if ((NULL == pstComDev) || (NULL == pcSndBuf))
+    {
+        return RET_INVALID;
+    }
+    //write
+    memset(acRcvBuf, 0, sizeof(acRcvBuf));
+    nRet = X5X7COM_SndCmdPkg(pstComDev, pcSndBuf, acRcvBuf, nLen, COM_CMD_DELAY_TIME);
+    if (RET_SUCCESS != nRet)
+    {
+        HHT_LOG(EN_ERR, "write (%s) failed", Pub_ConvertHexToStr(pcSndBuf, nLen));
+        return RET_FAILURE;
+    }
+    HHT_LOG(EN_INFO, " write (%s)[%d] ok", Pub_ConvertHexToStr(pcSndBuf, nLen),nLen);
+    return RET_SUCCESS;
 }
 
 
@@ -136,7 +157,7 @@ INT32 COM_SndCmdPkg(COMDEV * pstComDev, const UINT8 * pcBuf, UINT8 * pRcvBuf, IN
     {
         return RET_FAILURE;
     }
-    HHT_LOG(EN_INFO, "write (%s) ok", Pub_ConvertHexToStr(pcBuf, nRet));//写成功
+    HHT_LOG(EN_INFO, "com snd pkg write (%s) ok", Pub_ConvertHexToStr(pcBuf, nRet));//写成功
     
 //    Sleep(nDelayMs);
     nPreTime = Pub_GetCurrentTimeClick();
@@ -151,9 +172,31 @@ INT32 COM_SndCmdPkg(COMDEV * pstComDev, const UINT8 * pcBuf, UINT8 * pRcvBuf, IN
             bIsReading = false;
             continue;
         }
-        HHT_LOG(EN_INFO, "read (%s)", Pub_ConvertHexToStr(pRcvBuf, nRet));
+        HHT_LOG(EN_INFO, "com snd pkg read (%s)", Pub_ConvertHexToStr(pRcvBuf, nRet));
         return RET_SUCCESS;
     }
 
     return RET_FAILURE;
+}
+
+INT32 X5X7COM_SndCmdPkg(COMDEV *pstComDev, const UINT8 *pcBuf, UINT8 *pRcvBuf, INT32 nLen, const INT32 nDelayMs)
+{
+    INT32 nRet = -1;
+    INT32 nPreTime = 0;
+    INT32 nTimeOut = 0;
+    bool bIsReading = false;
+
+    if ((NULL == pstComDev) || (NULL == pcBuf) || (NULL == pRcvBuf))
+    {
+        return RET_INVALID;
+    }
+
+    nTimeOut = 2000;   //超时时间设置为2s
+    nRet = pstComDev->WriteCom((unsigned char*)pcBuf, nLen);
+    if (0 >= nRet)
+    {
+        return RET_FAILURE;
+    }
+    HHT_LOG(EN_INFO, "write (%s)[%d] ok", Pub_ConvertHexToStr(pcBuf, nRet),nLen);//写成功
+     return RET_SUCCESS;
 }

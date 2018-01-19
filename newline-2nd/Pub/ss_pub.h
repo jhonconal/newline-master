@@ -26,6 +26,7 @@ public:
     Q_OBJECT
 signals:
     void signal_openProcFromFileName(QString);//打开APP信号-->连接至MainDialog
+    void signal_openProcFromFileNameX5X7(QString);
     void SignalOpenComFailed();//连接COM失败信号---->连接至Maindialog
     void SignalOpenComSuccess();//打开串口成功信号
     void SignalTotalPkgNum(int);//总包数信号---->连接值UploadWidget
@@ -34,8 +35,11 @@ signals:
     void SignalCameraStatusCheck();//摄像头状态检测信号------>连接至MainDialog
     void SignalPubUsbStatusCheck();
     void SignalClearAllApp();
+    void SignalX9FirmwareCheck();//X9固件确认信号
+    void SignalFileNameTooLong();
 public:
     void PostOpenApp(QString strAppName);
+    void PostOpenAppX5X7(QString strAppName);
     void PostOpenComFailed();
     void PostOpenComSuccess();
     void PostTotalPkgNum(int nTotalPkgNum);
@@ -44,6 +48,8 @@ public:
     void PostCameraStatusCheck();
     void PostPubUsbStatusCheck();
     void PostClearAllApp();
+    void PostX9FirmwareCheck();
+    void PostFileNameTooLong();
 };
 
 extern PUBComClass  PUB_SS;

@@ -10,6 +10,7 @@ extern COMDEV g_stComDev;
 
 INT32 COM_GetComPortNameFromIndex(const INT32 nPortIndex, VOS_INT8 *pcComportName);
 INT32 COM_SndCmdPkg(COMDEV * pstComDev, const UINT8 * pcBuf, UINT8 * pRcvBuf, INT32 nLen, const INT32 nDelayMs);
+INT32 X5X7COM_SndCmdPkg(COMDEV * pstComDev, const UINT8 * pcBuf, UINT8 * pRcvBuf, INT32 nLen, const INT32 nDelayMs);
 INT32 Com_Write(COMDEV * pstComDev, UINT8* pcSndBuf, INT32 nLen);
-
+INT32 X5X7Com_Write(COMDEV * pstComDev, UINT8* pcSndBuf, INT32 nLen);
 #endif // COMOPERATE_H

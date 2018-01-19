@@ -32,6 +32,7 @@ public:
 
     INT32 ReadCom(UINT8 *pBuf, const INT32 nLen);// <= 0 err,> 0 OK
     INT32 ReadComByHeader(UINT8 *pBuf, const INT32 nLen);// <= 0 err,> 0 OK
+    INT32 ReadX5X7ComByHeader(UINT8 *pBuf, const INT32 nLen);// <= 0 err,> 0 OK
     INT32 WriteCom(UINT8 *pBuf, const INT32 nLen);// <= 0 err,> 0 OK
     INT32 IsOpenCom();  // 1:open, 0:closed
     INT32 CloseCom(void);//0 err ,1 ok

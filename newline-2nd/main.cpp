@@ -21,7 +21,7 @@ int main(int argc, char *argv[])
     QApplication a(argc, argv);
     QApplication::setApplicationName(APPLICATION_NAME);
     int index= QFontDatabase::addApplicationFont(":/Resource/Helvetica.ttf");
-    //     qDebug()<<"---------->"<<index;
+    //qDebug()<<"---------->"<<index;
     if(index!=-1)
     {
         QStringList strList(QFontDatabase::applicationFontFamilies(index));
@@ -64,6 +64,18 @@ int main(int argc, char *argv[])
         //
         ReadConfig();
         vos_pthread_t opsThreadID;
+#if    SUPORT_X5X7_DEVICE
+        nRet = VOS_CreateThread(&opsThreadID, distinguish_device, NULL);
+        if (RET_SUCCESS != nRet)
+        {
+            HHT_LOG(EN_ERR, "   create distinguish_device failed");
+        }
+        else
+        {
+            HHT_LOG(EN_ERR, "   create distinguish_device success");
+        }
+#else
+        ReadConfig();
         nRet = VOS_CreateThread(&opsThreadID, OpsCom_ThreadFn, NULL);
         if (RET_SUCCESS != nRet)
         {
@@ -73,10 +85,14 @@ int main(int argc, char *argv[])
         {
             HHT_LOG(EN_ERR, "   create OpsCom_Thread success");
         }
-//        w.showMinimized();
-//        w.hide();
-//        w.show();
+#endif
+
+#if 1
+       w.showMinimized();
+       w.hide();
+#else
         w.showNormal();
+#endif
         return a.exec();
     }
 

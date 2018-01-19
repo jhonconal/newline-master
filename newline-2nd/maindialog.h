@@ -47,6 +47,8 @@ DEFINE_GUID (UsbClassGuid, 0xa5dcbf10L, 0x6530, 0x11d2, 0x90, 0x1f, 0x00, 0xc0, 
 #include "Gui/pubusbdialog.h"
 #include "hhtheader.h"
 
+#define  SUPORT_X5X7_DEVICE  1
+
 #define  APPLICATION_NAME  "Newline assistant"
 #define  MONTAGE  "Montage Receiver" //定义特殊第三方软件Montage
 #define SHOWNORNAL   (WM_USER+0x0004)//自定义SendMessageA 的Msg参数
@@ -66,6 +68,7 @@ public:
     QVector<HHTAPPINFO>g_appInfoVector;
     int isSysCameraStatus();//摄像头检测
     void init();
+    void initWind();
     //用于记录程序关闭前设置的APP信息
     void WriteRecords();
     void ReadSettings();
@@ -101,10 +104,14 @@ public slots:
     void slot_RS232isAvaliable();
 
     void  slot_openProcFromFileName(QString fileName);
+
+    void  slot_openProcFromFileNameX5X7(QString fileName);
     //TrashWIdget删除APP响应信号
      void slot_deleteAppFromVector(QString appName);
 
      void slot_deleteAppFromVectorFailed();
+
+     void slot_fileNameTooLong();
 
     void  trayiconActivated(QSystemTrayIcon::ActivationReason reason);
 
@@ -119,6 +126,8 @@ public slots:
     void slot_pubUsbStatusCheck();
 
    void slot_clearAllApp();
+
+   void slot_x9FirmwareCheck();
 private slots:
 
     void on_checkButton_clicked();
@@ -148,6 +157,7 @@ private:
     UploadWidget *upload;
     QMenu *trayIconMenu;
     QSystemTrayIcon *trayIcon;
+    QAction *quitAction,*syncAction,*clearAction;
     bool  recvivedFailedOpenCom;
     bool  isFailedOpenCOM;
 };
